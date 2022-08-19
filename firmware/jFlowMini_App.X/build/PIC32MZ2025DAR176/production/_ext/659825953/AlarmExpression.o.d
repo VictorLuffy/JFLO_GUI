@@ -717,7 +717,7 @@ build/PIC32MZ2025DAR176/production/_ext/659825953/AlarmExpression.o: \
  ../src/Gui/../7z/7zTypes.h ../src/Gui/MainScreen.h \
  ../src/Gui/StatusBar.h ../src/Gui/GuiInterface.h ../src/Gui/RunningBar.h \
  ../src/Gui/Setting.h ../src/Device/DeviceInterface.h \
- ../src/Device/Audio.h
+ ../src/Device/Audio.h ../src/Device/GT911.h
 
 ../src/system_config/PIC32MZ2025DAR176/framework/gfx/libaria/libaria_init.h:
 
@@ -2192,3 +2192,5 @@ build/PIC32MZ2025DAR176/production/_ext/659825953/AlarmExpression.o: \
 ../src/Device/DeviceInterface.h:
 
 ../src/Device/Audio.h:
+
+../src/Device/GT911.h:

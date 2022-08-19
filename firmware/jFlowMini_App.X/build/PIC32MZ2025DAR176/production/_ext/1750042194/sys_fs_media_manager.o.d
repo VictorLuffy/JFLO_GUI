@@ -80,7 +80,8 @@ build/PIC32MZ2025DAR176/production/_ext/1750042194/sys_fs_media_manager.o: \
  ../../../../../third_party/rtos/FreeRTOS/Source/include/semphr.h \
  ../../../../../third_party/rtos/FreeRTOS/Source/include/queue.h \
  ../../../../../third_party/rtos/FreeRTOS/Source/include/task.h \
- ../../../../../third_party/rtos/FreeRTOS/Source/include/list.h
+ ../../../../../third_party/rtos/FreeRTOS/Source/include/list.h \
+ ../../../../../framework/system/debug/sys_debug.h
 
 ../../../../../framework/system/fs/src/sys_fs_media_manager_local.h:
 
@@ -243,3 +244,5 @@ build/PIC32MZ2025DAR176/production/_ext/1750042194/sys_fs_media_manager.o: \
 ../../../../../third_party/rtos/FreeRTOS/Source/include/task.h:
 
 ../../../../../third_party/rtos/FreeRTOS/Source/include/list.h:
+
+../../../../../framework/system/debug/sys_debug.h:

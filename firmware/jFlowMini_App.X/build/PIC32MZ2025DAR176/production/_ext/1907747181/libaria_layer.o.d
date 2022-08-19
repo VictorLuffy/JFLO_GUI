@@ -92,7 +92,9 @@ build/PIC32MZ2025DAR176/production/_ext/1907747181/libaria_layer.o: \
  ../../../../../framework/gfx/libaria/inc/libaria_editwidget.h \
  ../../../../../framework/gfx/libaria/inc/libaria_screen.h \
  ../../../../../framework/gfx/libaria/inc/libaria_string.h \
- ../../../../../framework/gfx/libaria/inc/libaria_utils.h
+ ../../../../../framework/gfx/libaria/inc/libaria_utils.h \
+ ../../../../../framework/system/debug/sys_debug.h \
+ ../../../../../framework/system/system.h
 
 ../../../../../framework/gfx/libaria/inc/libaria_layer.h:
 
@@ -279,3 +281,7 @@ build/PIC32MZ2025DAR176/production/_ext/1907747181/libaria_layer.o: \
 ../../../../../framework/gfx/libaria/inc/libaria_string.h:
 
 ../../../../../framework/gfx/libaria/inc/libaria_utils.h:
+
+../../../../../framework/system/debug/sys_debug.h:
+
+../../../../../framework/system/system.h:

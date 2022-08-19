@@ -148,6 +148,15 @@ void GT911_RequestRead() {
     s_GT911RequestRead = true;
 }
 
+/** @brief Read state of GT911
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return E_GT911StateID state of touch screen
+ */
+E_GT911StateID GT911_GetTouchScreenState()
+{
+    return s_GT911OperationState;
+}
 
 /** @brief Maintain state machine to check data ready, read data from GT911
  * This function should call forever inside a task
@@ -161,7 +170,7 @@ void GT911_Task() {
     uint16_t x = 0;
     uint16_t y = 0;
     uint8_t status = 0;
-
+//    SYS_PRINT("\nTouch state: [%d]", s_GT911OperationState);
     switch (s_GT911OperationState) {
         case eTouchInitStateID:
             GT911_Initialize();

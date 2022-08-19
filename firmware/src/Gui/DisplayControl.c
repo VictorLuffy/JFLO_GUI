@@ -166,6 +166,7 @@ inline void DisplayControl_ResetTotalOperatingTime(void)
  */
 static void DisplayControl_UpdateMonitor( uintptr_t context, uint32_t currTick)
 {  
+#define JFLO_DEBUG_GUI
 #ifndef JFLO_DEBUG_GUI
     if (MotorTask_GetPublicData(&gs_dispData.dataFlow) == false) {
         return;
@@ -201,12 +202,27 @@ static void DisplayControl_UpdateMonitor( uintptr_t context, uint32_t currTick)
     gs_dispData.dataTemp.chamberOutTemp = test1;
     gs_dispData.dataTemp.breathCircuitOutTemp = test1;
     gs_dispData.dataFlow.airFlow = test1;
-    if (gs_dispData.dataFlow.o2Flow < 50)
-        gs_dispData.dataFlow.o2Flow = test1;
-    else
-        gs_dispData.dataFlow.o2Flow = 50;
+    
+//    if (gs_dispData.dataFlow.o2Flow < 50)
+//        gs_dispData.dataFlow.o2Flow = test1;
+//    else
+//        gs_dispData.dataFlow.o2Flow = 50;
+//  
+//        gs_dispData.dataO2Concentration = test1;
   
-        gs_dispData.dataO2Concentration = test1;
+//    static uint32_t xCurrentTick = 0, xPreTick = 0;
+    
+//    xCurrentTick = xTaskGetTickCount();
+//    if (xPreTick == 0)
+//    {
+//        xPreTick = xCurrentTick;
+//    }
+//    
+//    if (xCurrentTick - xPreTick < 25000)
+//    {
+//        gs_dispData.dataFlow.o2Flow
+//    }
+    
     
 //    gs_dispData.dataO2Concentration = test1;
     gs_dispData.spo2Data.aveValue = test1;

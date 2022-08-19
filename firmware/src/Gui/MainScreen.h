@@ -97,10 +97,10 @@ typedef struct
 /** @brief Define the data variable in mainscreen */ 
 typedef struct
 {
+    float preO2Flow, currentO2Flow, O2FlowDelta;
     int preTemp, currentTemp;
     int preFlow, currentFlow;
     int preO2, currentO2;
-    int preO2Flow, currentO2Flow;
     int preSpO2, currentSpO2;
     int prePR, currentPR;
 } MainScreen_Data_Struct;
@@ -198,7 +198,7 @@ bool MainScreen_CheckButtonPressTimeout(void);
 void MainScreen_SetButtonPressedState(bool state);
 void MainScreen_ResetButtonNoActionTickCounter(void);
 bool MainScreen_CheckButtonNoActionTimeout(void);
-void MainScreen_o2FlowNoChangeTickCounter(void);
+void MainScreen_o2FlowChangeTickCounter(void);
 void MainScreen_checkO2FlowChange(void);
 TickType_t MainScreen_CalculateDeltaTick(TickType_t current, TickType_t last);
 

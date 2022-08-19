@@ -32,6 +32,7 @@
 #include "Gui/AnimationControl.h"
 #include "Gui/AlarmExpression.h"
 #include "Delay.h"
+#include "Device/GT911.h"
 
 #define SETTING_AREA_IN_POS_X 42
 #define SETTING_AREA_OUT_POS_X 300
@@ -313,8 +314,12 @@ void MainScreen_SetAnimType(E_AnimType type, int id)
 /** @brief Handle the behavior when state of process is ChangedSetpointAreaShowingState*/
 static E_GuiResult MainScreen_SettingAreaRun(void)
 {
+//    SYS_PRINT("\nMain screen state: [%d]", gs_mainscreenCtrl.subState);
     switch (gs_mainscreenCtrl.subState){
         case eIdleDispSubstate:
+            // Get tick no action when having action on screen
+            if (GT911_GetTouchScreenState() != eTouchIdleStateID)
+                MainScreen_ResetButtonNoActionTickCounter();
             if(!MainScreen_IsSettingPopupShow() && MainScreen_CheckButtonPressTimeout())
             {
 //                SYS_PRINT("Show setting popup \n");
@@ -518,8 +523,8 @@ void MainScreen_UpdateMonitor(bool isForceUpdate)
     gs_mainscreenData.currentO2 = (int)DisplayControl_GetDataO2Concentration();
     gs_mainscreenData.currentSpO2 = (int)DisplayControl_GetDataSpO2();
     gs_mainscreenData.currentPR = (int)DisplayControl_GetDataPR();
-    gs_mainscreenData.currentO2Flow = (int)DisplayControl_GetDataO2Flow();
 
+    gs_mainscreenData.currentO2Flow = DisplayControl_GetDataO2Flow();
     // Update SpO2
     MainScreen_DisplayCurrentSpO2();
     
@@ -945,6 +950,7 @@ void MainScreen_InitPreData()
     gs_mainscreenData.preSpO2 = -1;
     gs_mainscreenData.prePR = -1;
     gs_mainscreenData.preO2Flow = -1;
+    gs_mainscreenData.O2FlowDelta = 0;
     
     gs_mainscreenCtrl.TSettingPrevValue = -1;
     gs_mainscreenCtrl.FSettingPrevValue = -1;
@@ -1172,7 +1178,7 @@ void MainScreen_ResetButtonPressTickCounter(void)
 bool MainScreen_CheckButtonPressTimeout(void)
 {
     if (!gs_mainscreenCtrl.isButtonPressed) 
-        return false;  
+        return false;
 
     TickType_t delta = DisplayControl_CalculateDeltaTick(xTaskGetTickCount(), gs_mainscreenCtrl.xButtonPressTickCounter );
     if ( delta >= PRESS_TO_SETTING_POPUP_TIMEOUT)
@@ -1193,6 +1199,7 @@ void MainScreen_ResetButtonNoActionTickCounter(void)
 
 bool MainScreen_CheckButtonNoActionTimeout(void)
 {
+    SYS_PRINT("\nNo action button tick: [%d]", gs_mainscreenCtrl.xButtonNoActionTickCounter);
     TickType_t delta = DisplayControl_CalculateDeltaTick(xTaskGetTickCount(), gs_mainscreenCtrl.xButtonNoActionTickCounter );
     TickType_t delta_1 = DisplayControl_CalculateDeltaTick(xTaskGetTickCount(), gs_mainscreenCtrl.xO2FlowNoChangeTickCounter);
     if (gs_mainscreenCtrl.currentQualitySetting == eFiO2SettingId)
@@ -1221,19 +1228,24 @@ void MainScreen_SetButtonPressedState(bool state)
     gs_mainscreenCtrl.isButtonPressed = state;
 }
 
-void MainScreen_o2FlowNoChangeTickCounter(void)
+void MainScreen_o2FlowChangeTickCounter(void)
 {
     gs_mainscreenCtrl.xO2FlowNoChangeTickCounter = xTaskGetTickCount();
 }
 
 void MainScreen_checkO2FlowChange(void)
 {
-    char strbuff[5] = {0};
-    laString str;
-    if (gs_mainscreenData.preO2Flow != gs_mainscreenData.currentO2Flow)
-    {
-        MainScreen_o2FlowNoChangeTickCounter();
+    if (gs_mainscreenData.currentO2Flow != gs_mainscreenData.preO2Flow)
+    {   
+        gs_mainscreenData.O2FlowDelta += (gs_mainscreenData.currentO2Flow - gs_mainscreenData.preO2Flow);
+        
         gs_mainscreenData.preO2Flow = gs_mainscreenData.currentO2Flow;
+        
+        if (gs_mainscreenData.O2FlowDelta > 0.5 || gs_mainscreenData.O2FlowDelta < -0.5)
+        {
+            gs_mainscreenData.O2FlowDelta = 0;
+            MainScreen_o2FlowChangeTickCounter();
+        }
     }
     
 }

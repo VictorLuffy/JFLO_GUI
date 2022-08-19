@@ -717,7 +717,8 @@ build/PIC32MZ2025DAR176/production/_ext/659825953/MainScreen.o: \
  ../src/Gui/../7z/LzmaEnc.h ../src/Gui/../7z/7zTypes.h \
  ../src/Gui/../7z/LzmaDec.h ../src/Gui/../7z/7zTypes.h \
  ../src/Gui/StatusBar.h ../src/Gui/GuiInterface.h ../src/Gui/RunningBar.h \
- ../src/Gui/AlarmExpression.h ../src/Utilities/Delay.h
+ ../src/Gui/AlarmExpression.h ../src/Utilities/Delay.h \
+ ../src/Device/GT911.h
 
 ../src/system_config/PIC32MZ2025DAR176/system_config.h:
 
@@ -2194,3 +2195,5 @@ build/PIC32MZ2025DAR176/production/_ext/659825953/MainScreen.o: \
 ../src/Gui/AlarmExpression.h:
 
 ../src/Utilities/Delay.h:
+
+../src/Device/GT911.h:

@@ -55,7 +55,12 @@ build/PIC32MZ2025DAR176/production/_ext/1597685232/gfxu_image_png_external.o: \
  ../../../../../framework/gfx/utils/inc/gfxu_palette.h \
  ../../../../../framework/../third_party/decoder/lodepng/lodepng.h \
  ../../../../../framework/gfx/hal/inc/gfx_context.h \
- ../../../../../framework/gfx/hal/inc/gfx_hal.h
+ ../../../../../framework/gfx/hal/inc/gfx_hal.h \
+ ../../../../../framework/system/debug/sys_debug.h \
+ ../../../../../framework/system/system.h \
+ ../../../../../framework/system/common/sys_common.h \
+ ../../../../../framework/system/common/sys_module.h \
+ ../../../../../third_party/rtos/FreeRTOS/Source/portable/MPLAB/PIC32MZ/portmacro.h
 
 ../../../../../framework/gfx/utils/inc/gfxu_image.h:
 
@@ -168,3 +173,13 @@ build/PIC32MZ2025DAR176/production/_ext/1597685232/gfxu_image_png_external.o: \
 ../../../../../framework/gfx/hal/inc/gfx_context.h:
 
 ../../../../../framework/gfx/hal/inc/gfx_hal.h:
+
+../../../../../framework/system/debug/sys_debug.h:
+
+../../../../../framework/system/system.h:
+
+../../../../../framework/system/common/sys_common.h:
+
+../../../../../framework/system/common/sys_module.h:
+
+../../../../../third_party/rtos/FreeRTOS/Source/portable/MPLAB/PIC32MZ/portmacro.h:

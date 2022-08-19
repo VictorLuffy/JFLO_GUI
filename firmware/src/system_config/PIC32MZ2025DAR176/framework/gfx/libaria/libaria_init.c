@@ -152,7 +152,6 @@ laImageWidget* imageMuteIcon;
 laImageWidget* iconAlarmActive;
 laLabelWidget* labelSpO2Dash;
 laLabelWidget* labelPRDash;
-laImageWidget* imgAlarmHandIndicator;
 laWidget* SC_RunningTimePanel;
 laLabelWidget* SC_RunningTimeLabel;
 laImageWidget* SC_WifiIcon;
@@ -303,7 +302,6 @@ laImageWidget* SC_SaveConfirmBackgroundImage;
 laButtonWidget* SC_SaveConfirmYesButton;
 laButtonWidget* SC_SaveConfirmNoButton;
 laLabelWidget* SC_SaveConfirmTitleLabel;
-laImageWidget* SC_AlarmHandIndicator;
 laLabelWidget* lbTitleAirflow;
 laLabelWidget* lbTitleO2flow;
 laLabelWidget* lbTitleTemp;
@@ -1676,16 +1674,16 @@ static void ScreenCreate_MainScreen(laScreen* screen)
     laWidget_AddChild((laWidget*)layer0, (laWidget*)rectAlarmArea);
 
     lbAlarmInfomation = laLabelWidget_New();
-    laWidget_SetPosition((laWidget*)lbAlarmInfomation, 26, 1);
+    laWidget_SetPosition((laWidget*)lbAlarmInfomation, 9, 1);//26
     laWidget_SetSize((laWidget*)lbAlarmInfomation, 230, 188);
     laWidget_SetScheme((laWidget*)lbAlarmInfomation, &JFLO_MonitoringArea_Scheme);
     laWidget_SetBackgroundType((laWidget*)lbAlarmInfomation, LA_WIDGET_BACKGROUND_NONE);
     laWidget_SetBorderType((laWidget*)lbAlarmInfomation, LA_WIDGET_BORDER_NONE);
-    laLabelWidget_SetHAlignment(lbAlarmInfomation, LA_HALIGN_LEFT);
+    laLabelWidget_SetHAlignment(lbAlarmInfomation, LA_HALIGN_CENTER);
     laWidget_AddChild((laWidget*)rectAlarmArea, (laWidget*)lbAlarmInfomation);
 
     btnX_AlarmArea = laButtonWidget_New();
-    laWidget_SetPosition((laWidget*)btnX_AlarmArea, 60, 220);
+    laWidget_SetPosition((laWidget*)btnX_AlarmArea, 48, 220);
     laWidget_SetSize((laWidget*)btnX_AlarmArea, 71, 52);
     laWidget_SetScheme((laWidget*)btnX_AlarmArea, &JFLO_Button_OnChangedSetpointArea_Scheme);
     laWidget_SetBackgroundType((laWidget*)btnX_AlarmArea, LA_WIDGET_BACKGROUND_FILL);
@@ -1697,7 +1695,7 @@ static void ScreenCreate_MainScreen(laScreen* screen)
     laWidget_AddChild((laWidget*)rectAlarmArea, (laWidget*)btnX_AlarmArea);
 
     btnAlarmReset_AlarmArea = laButtonWidget_New();
-    laWidget_SetPosition((laWidget*)btnAlarmReset_AlarmArea, 140, 220);
+    laWidget_SetPosition((laWidget*)btnAlarmReset_AlarmArea, 128, 220);
     laWidget_SetSize((laWidget*)btnAlarmReset_AlarmArea, 71, 52);
     laWidget_SetScheme((laWidget*)btnAlarmReset_AlarmArea, &JFLO_Button_OnChangedSetpointArea_Scheme);
     laWidget_SetBackgroundType((laWidget*)btnAlarmReset_AlarmArea, LA_WIDGET_BACKGROUND_FILL);
@@ -1844,16 +1842,6 @@ static void ScreenCreate_MainScreen(laScreen* screen)
     laLabelWidget_SetText(labelPRDash, laString_CreateFromID(string_text_Dash_S45));
     laLabelWidget_SetHAlignment(labelPRDash, LA_HALIGN_LEFT);
     laWidget_AddChild((laWidget*)layer0, (laWidget*)labelPRDash);
-
-    imgAlarmHandIndicator = laImageWidget_New();
-    laWidget_SetPosition((laWidget*)imgAlarmHandIndicator, 119, 27);
-    laWidget_SetSize((laWidget*)imgAlarmHandIndicator, 24, 22);
-    laWidget_SetVisible((laWidget*)imgAlarmHandIndicator, LA_FALSE);
-    laWidget_SetScheme((laWidget*)imgAlarmHandIndicator, &JFLO_Background_Scheme);
-    laWidget_SetBackgroundType((laWidget*)imgAlarmHandIndicator, LA_WIDGET_BACKGROUND_NONE);
-    laWidget_SetBorderType((laWidget*)imgAlarmHandIndicator, LA_WIDGET_BORDER_NONE);
-    laImageWidget_SetImage(imgAlarmHandIndicator, &iconAlarmHandIndicate);
-    laWidget_AddChild((laWidget*)layer0, (laWidget*)imgAlarmHandIndicator);
 
 }
 
@@ -3301,17 +3289,6 @@ static void ScreenCreate_SettingScreen(laScreen* screen)
     laLabelWidget_SetText(SC_SaveConfirmTitleLabel, laString_CreateFromID(string_text_SettingScreen_SaveConfirmTitle));
     laWidget_AddChild((laWidget*)SC_SaveConfirmPanel, (laWidget*)SC_SaveConfirmTitleLabel);
 
-    SC_AlarmHandIndicator = laImageWidget_New();
-    laWidget_SetPosition((laWidget*)SC_AlarmHandIndicator, 119, 27);
-    laWidget_SetSize((laWidget*)SC_AlarmHandIndicator, 24, 22);
-    laWidget_SetVisible((laWidget*)SC_AlarmHandIndicator, LA_FALSE);
-    laWidget_SetScheme((laWidget*)SC_AlarmHandIndicator, &JFLO_Background_Scheme);
-    laWidget_SetBackgroundType((laWidget*)SC_AlarmHandIndicator, LA_WIDGET_BACKGROUND_NONE);
-    laWidget_SetBorderType((laWidget*)SC_AlarmHandIndicator, LA_WIDGET_BORDER_NONE);
-    laImageWidget_SetImage(SC_AlarmHandIndicator, &iconAlarmHandIndicate);
-    laWidget_AddChild((laWidget*)layer0, (laWidget*)SC_AlarmHandIndicator);
-    
-    SYS_PRINT("Finished init settingscreen \n");
 }
 
 static void ScreenCreate_MaintenanceScreen(laScreen* screen)

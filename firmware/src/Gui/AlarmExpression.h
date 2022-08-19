@@ -35,10 +35,14 @@
 #define ALARM_VIDEO_POS_Y                   85
 
 #define ALARM_MAX_VIDEO_SIZE 4400000 // this is max data among alarms 
-#define ADDITIONAL_MESSAGE_TIMEOUT 5000
+#define MESSAGE_TIMEOUT_5S 5000
+#define MESSAGE_TIMEOUT_10S 10000
+#define ALARM_TITLE_TIMEOUT 5000
+#define ALARM_POPUP_TOUCHSCREEN_NO_ACTION_TIMEOUT 60000
 
 #define ALARM_AREA_DISPLAY_IN_POS_X 12
 #define ALARM_AREA_DISPLAY_OUT_POS_X 275
+
 
 //#define JFLO_DEBUG_ALARM
 
@@ -46,6 +50,7 @@ typedef void (*void_func_p)();
 
 typedef struct {    
     int alarmTitleStrId; /**< Alarm title string start id */
+    int alarmDetailTiltleStrId;
     int alarmDetailMsgStrStartId; /**< Alarm detail message string start id */
     int alarmDetailMsgStrEndId; /**< Alarm detail message string start id */
     bool alarmPopupEnable; /**< Alarm popup enable */
@@ -67,6 +72,7 @@ typedef enum
     eShowAlarmPopupAlarmState,       /**< the alarm popup showing */
     eHideAlarmPopupAlarmState,       /**< the alarm popup hiding */
     eShowHideAnimationRunningAlarmState,       /**< the popup animation running */
+    eShowAlarmDetailTitle,
     ePlayAnimationAlarmState,               /**< Play animation */
     eStopAnimationAlarmState,               /**< Stop animation */
     eInactiveAlarmState,        /**< Alarm is inactive */
@@ -85,6 +91,7 @@ typedef struct
     bool alarmAdditionalMessageEnable; /**< this store status for additional message */
     int alarmDetailMsgStrOffsetId; /**< Alarm detail message offset id (alarm with multiple conditions) */
     int alarmResetButtonStatus; /**< this store status for overriding the ResetButton display */
+    TickType_t xTouchingScreenNoActionTick;
     bool isAlarmPopupAutoShowAtInit; /**< alarm popup auto show at init */
 } Alarm_Data_Struct;
 
@@ -510,7 +517,33 @@ bool AlarmExpression_GetAlarmPopupAutoShowAtInit();
  */
 void AlarmExpression_SetAlarmPopupAutoShowAtInit(bool f);
 
+/** @brief AlarmExpression_GetAlarmDetailTitleStringId 
+ *  @param [in]  E_AlarmId id
+ *  @param [out]  uint32_t string id
+ *  @return None
+ */
+uint32_t AlarmExpression_GetAlarmDetailTitleStringId(E_AlarmId id);
+void AlarmExpression_SetxShowAlarmDetailTitleTick(TickType_t val);
+void AlarmExpression_SetxShowAlarmDetailTitleTick(TickType_t val);
+void AlarmExpression_SetShowAlarmDetailMessageTick(TickType_t val);
+void AlarmExpression_SetShowAlarmAdditionalMessageTick(TickType_t val);
+void AlarmExpression_SetShowAlarmDetailMessage(bool flag);
+void AlarmExpression_SetShowAlarmAdditionalMessage(bool flag);
 
+/**@brief Get new tick count when have action of touch screen
+ * @param [in]: None
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_ResetTouchScreenNoActionTickCounter(void);
+
+/**@brief Check no action on touch screen timeout
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true if no action on touch screen timeout
+ * @retval false if no action on touch screen not timeout
+ */
+bool AlarmExpression_CheckTouchScreenNoActionTimeout(void);
 //FIXME: alloc data to ddr section because lack of memory, with this using, variables is alway init with 0 value
 __attribute__((section(".ddr_data"), space(prog))) 
 AlarmExpressionConfig alarmExpressionConfigList[eNoOfAlarmId];

@@ -17,17 +17,6 @@
 #define INTRO_VIDEO_FRAMESIZE 261120
 #define FRAME_DECODE_DELAY 2 // delay playing for waiting decoding first frame
 
-/** @brief Define the data variable in VideoScreen */ 
-typedef struct
-{
-    /* The application's current state */
-    int32_t loadingValue;
-    uint8_t currentScheme;
-    uint16_t startPlayStartupSoundTick;
-    bool isStartupSoundPlaying;
-    
-} Video_Data_Struct;
-
 /** @brief Define color ID for self check indicator */
 typedef enum
 {
@@ -35,6 +24,20 @@ typedef enum
     eStartupYellowSchemeID,
     eStartupRedSchemeID
 }E_SelfCheckIndicatorScheme_t;
+
+
+/** @brief Define the data variable in VideoScreen */ 
+typedef struct
+{
+    /* The application's current state */
+    int32_t loadingValue;
+    uint16_t startPlayStartupSoundTick;
+    uint16_t xPreStatusBarTickCounter;
+    uint16_t xCurrentStatusBarTickCounter;
+    E_SelfCheckIndicatorScheme_t currentScheme;
+    bool isStartupSoundPlaying;
+    
+} Video_Data_Struct;
 
 VideoControl introVideoControl;
 

@@ -27,10 +27,10 @@
 #define    CRC_BYTE                             (2)
 
 /** @brief Size of image file */
-#define     SIZE_GRAPHIC_IMAGE                      (50152)
+#define     SIZE_GRAPHIC_IMAGE                      (49601)
 
 /** @brief Size of font file */
-#define     SIZE_GRAPHIC_ABELFONT                   (46080)
+#define     SIZE_GRAPHIC_ABELFONT                   (46704)
 
 /** @brief Size of font file */
 #define     SIZE_GRAPHIC_BEBASFONT                  (95687)

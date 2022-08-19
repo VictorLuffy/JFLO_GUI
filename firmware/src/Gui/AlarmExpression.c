@@ -12,11 +12,33 @@
 #include "Gui/AnimationControl.h"
 #include "Gui/MainScreen.h"
 #include "Device/DeviceInterface.h"
+#include "Device/GT911.h"
+
+/** @brief flag alarm detail title show done or not*/
+static bool isAlarmDetailTitleShow = false;
+
+/** @brief flag alarm detail title show done or not*/
+static bool isDetailMessageShow = false;
+
+/** @brief flag alarm detail title show done or not*/
+static bool isAdditionalMessageShow = false;
+
+/** @brief alarm detail title tick count*/
+static TickType_t xShowAlarmDetailTitleTick = 0;
+
+static bool isVideoJustComplete = true;
+
+/** @brief alarm additional message tick count*/
+static TickType_t xAdditionalMessageTick = 0;
+
+/** @brief alarm message tick count*/
+static TickType_t xDetailMessageTick = 0;
 
 void AlarmExpression_InitData( void )
 {
     alarmExpressionConfigList[eI2C1ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eI2C1ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -29,6 +51,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eI2C2ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eI2C2ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -41,6 +64,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eI2C3ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eI2C3ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -53,6 +77,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eI2C4ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eI2C4ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -65,6 +90,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSPI3ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eSPI3ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -77,6 +103,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eUart1ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eUart1ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -89,6 +116,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eUart2ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eUart2ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -101,6 +129,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eUart4ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eUart4ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -113,6 +142,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eUart6ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eUart6ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -125,6 +155,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eAirFlowSensorErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eAirFlowSensorErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -137,6 +168,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eO2FlowSensorErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eO2FlowSensorErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -149,6 +181,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eBME280ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eBME280ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -161,6 +194,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eADXL345ErrorAlarmID] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eADXL345ErrorAlarmID,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -173,6 +207,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eDRV8308ErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eDRV8308ErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -185,6 +220,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eAudioErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eAudioErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -197,6 +233,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eMotorTaskErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eMotorTaskErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -209,6 +246,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eHeaterTaskErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eHeaterTaskErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -221,6 +259,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eHumidityTaskErrorAlarm] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_eHumidityTaskErrorAlarm,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -233,8 +272,9 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eBreathingCircuitNotConnectedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E001_CheckForTubeConnection,
-        .alarmDetailMsgStrStartId = -1,
-        .alarmDetailMsgStrEndId = -1,
+        .alarmDetailTiltleStrId = string_AlarmDetailTitle_E001_CheckForTubeConnection,
+        .alarmDetailMsgStrStartId = string_AlarmMessage_E110_DeviceError,//-1,
+        .alarmDetailMsgStrEndId = string_AlarmMessage_E110_DeviceError,//-1,
         .alarmPopupEnable = true,
         .alarmCloseButtonEnable = true,
         .alarmResetButtonEnable = false,
@@ -245,6 +285,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCheckLeakAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E002_CheckForLeaks,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -257,6 +298,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCheckBlockageAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E003_CheckforBlockage,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -269,6 +311,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eNonGenuineCircuitAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E004_TubeCheck,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E004_NonGenuineCircuit,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E004_NonGenuineCircuit,
         .alarmPopupEnable = true,
@@ -281,6 +324,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eBreathingCircuitChangedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E005_TubeCheck,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E005a_AdultCircuitToPediatricMode,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E005f_DisinfectionCircuitToPediatricMode,
         .alarmPopupEnable = true,
@@ -293,6 +337,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eExpiredCircuitAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E006_ExpiredCircuit,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E006_ExpiredCircuit,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E006_ExpiredCircuit,
         .alarmPopupEnable = true,
@@ -305,6 +350,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCheckConnectionChamberAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E007_CheckConnectionOfChamber,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -317,6 +363,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eNoMoreWaterInChamberAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E008_CheckWater,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -329,6 +376,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eRunOutOfWaterAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E009_CheckWater,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -341,6 +389,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eLowTemperatureAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E010_LowTemperature,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E010a_AmbientTempLowerThan18CelsiusDegree,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E010b_AmbientTempEqualOrOverThan18CelsiusDegree,
         .alarmPopupEnable = true,
@@ -353,6 +402,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eHighTemperatureAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E011_HighTemperature,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E011a_AmbientTempLowerThanSettingTemp,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E011b_AmbientTempEqualOrOverThanSettingTemp,
         .alarmPopupEnable = true,
@@ -365,6 +415,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eHighTemperatureAbnormalityAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E012_HighTemperature,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E012,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E012,
         .alarmPopupEnable = true,
@@ -377,6 +428,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eRoomTemperatureLowToAchieveTargetTemperatureAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E013_CannotReachTargetTemperature,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E013,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E013,
         .alarmPopupEnable = true,
@@ -389,6 +441,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCheckOperatingConditionsAlarmID] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E014,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E014a_AmbientTempLowerThan42CelsiusDegree,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E014b_AmbientTempEqualOrOverThan42CelsiusDegree,
         .alarmPopupEnable = true,
@@ -401,6 +454,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eDeviceErrorToAchieveTargetTemperatureAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E015_CannotReachTargetTemperature,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E015,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E015,
         .alarmPopupEnable = true,
@@ -413,6 +467,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eOxygenHighAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E016_O2TooHigh,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E016,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E016,
         .alarmPopupEnable = true,
@@ -425,6 +480,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eOxygenLowAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E017_O2TooLow,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E017,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E017,
         .alarmPopupEnable = true,
@@ -437,6 +493,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eDevicePostureAbnormalAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E018_CheckDevicePosition,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,//string_AlarmMessage_Animation_TBD,
         .alarmDetailMsgStrEndId = -1,//string_AlarmMessage_Animation_TBD,
         .alarmPopupEnable = true,
@@ -450,6 +507,7 @@ void AlarmExpression_InitData( void )
     alarmExpressionConfigList[eDevicePostureBadAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E019_CheckDevicePosition,
         .alarmDetailMsgStrStartId = -1,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
         .alarmCloseButtonEnable = true,
@@ -461,6 +519,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSwitchToBatteryModeAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E020_SwitchToBatteryMode,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -473,6 +532,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eBatteryLowAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E021_BatteryLow,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E021,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E021,
         .alarmPopupEnable = true,
@@ -485,6 +545,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eBatteryGetsRunOutAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E022_BatteryGetRunOut,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -497,6 +558,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eStopFunctionAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E023_StopFunction,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E023,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E023,
         .alarmPopupEnable = true,
@@ -509,6 +571,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[ePowerNotEnoughAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E024_PowerIsNotEnough,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E024,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E024,
         .alarmPopupEnable = true,
@@ -521,6 +584,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSpO2FailedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E025_SpO2Failed,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E025,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E025,
         .alarmPopupEnable = true,
@@ -533,6 +597,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSpO2LowAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E026_SpO2Low,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E026,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E026,
         .alarmPopupEnable = true,
@@ -545,6 +610,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSpO2SensorProbeAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E027_CheckTheSpO2SensorProbe,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E027,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E027,
         .alarmPopupEnable = true,
@@ -557,6 +623,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSpO2SignalLossAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E028_SpO2SignalLoss,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E028,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E028,
         .alarmPopupEnable = true,
@@ -569,6 +636,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSpO2SensorUnpluggedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E029_SpO2SensorUnplugged,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E029,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E029,
         .alarmPopupEnable = true,
@@ -581,6 +649,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eWaterSupplyCheckAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E030_WaterSupplyCheck,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -593,6 +662,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eWaterTankConnectionCheckAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E031_WaterTankConnectionCheck,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -605,6 +675,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eAirFlowAbnormalAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E032_AirFlowAbnormal,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E032,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E032,
         .alarmPopupEnable = true,
@@ -617,6 +688,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eMainUnitBatteryDisconnectedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E033_MainUnitBatteryDisconnected,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E033,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E033,
         .alarmPopupEnable = true,
@@ -629,6 +701,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCradleBatteryDisconnectedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E034_CradleBatteryDisconnected,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E034,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E034,
         .alarmPopupEnable = true,
@@ -641,6 +714,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureOxygenFlowMeasurementFlowSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E100_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E100_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E100_DeviceError,
         .alarmPopupEnable = true,
@@ -653,6 +727,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureAirFlowMeasurementFlowSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E101_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E101_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E101_DeviceError,
         .alarmPopupEnable = true,
@@ -665,6 +740,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureChamberTemperatureSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E102_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E102_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E102_DeviceError,
         .alarmPopupEnable = true,
@@ -677,6 +753,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureCoilTemperatureSendorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E103_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E103_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E103_DeviceError,
         .alarmPopupEnable = true,
@@ -689,6 +766,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureBreathingCircuitOutTemperatureSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E104_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E104_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E104_DeviceError,
         .alarmPopupEnable = true,
@@ -701,6 +779,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureEnvironmentSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E105_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E105_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E105_DeviceError,
         .alarmPopupEnable = true,
@@ -713,6 +792,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureCurrentSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E106_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E106_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E106_DeviceError,
         .alarmPopupEnable = true,
@@ -725,6 +805,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureBlowerAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E107_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E107_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E107_DeviceError,
         .alarmPopupEnable = true,
@@ -737,6 +818,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eSpeakerDisconnectedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E108_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E108_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E108_DeviceError,
         .alarmPopupEnable = true,
@@ -749,6 +831,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureWaterLevelSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E109_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E109_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E109_DeviceError,
         .alarmPopupEnable = true,
@@ -761,6 +844,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureExternalFlashMemoryAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E110_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E110_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E110_DeviceError,
         .alarmPopupEnable = true,
@@ -773,6 +857,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureAccelerationSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E111_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E111_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E111_DeviceError,
         .alarmPopupEnable = true,
@@ -785,6 +870,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eFailureLightSensorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E112_DeviceError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E112_DeviceError,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E112_DeviceError,
         .alarmPopupEnable = true,
@@ -797,6 +883,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eMainUnitBatteryCommunicationErrorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E113_MainUnitBatteryCommunicationError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -809,6 +896,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCradleBatteryCommunicationErrorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E114_CradleBatteryCommunicationError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -821,6 +909,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eCradleCommunicationErrorAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E115_CradleCommunicationError,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -833,6 +922,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eMainMCUFailedOrOutOfControlAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E116_MainMicrocomputerFailed,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = false,
@@ -846,6 +936,7 @@ void AlarmExpression_InitData( void )
     
     alarmExpressionConfigList[eESP32FailedAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E117_ESP32Failed,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = -1,
         .alarmDetailMsgStrEndId = -1,
         .alarmPopupEnable = true,
@@ -858,6 +949,7 @@ void AlarmExpression_InitData( void )
     };
     alarmExpressionConfigList[eBreathingCircuitHeaterWireBrokenAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E118_BreathingCircuitHeaterWireBroken,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E118,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E118,
         .alarmPopupEnable = true,
@@ -871,6 +963,7 @@ void AlarmExpression_InitData( void )
     
     alarmExpressionConfigList[eFailureSpo2ModuleAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E119,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E119,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E119,
         .alarmPopupEnable = true,
@@ -884,6 +977,7 @@ void AlarmExpression_InitData( void )
     
     alarmExpressionConfigList[eFailureRTCModuleAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E120,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E120,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E120,
         .alarmPopupEnable = true,
@@ -897,6 +991,7 @@ void AlarmExpression_InitData( void )
     
     alarmExpressionConfigList[eFailureLCDTouchModuleAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E121,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E121,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E121,
         .alarmPopupEnable = true,
@@ -910,6 +1005,7 @@ void AlarmExpression_InitData( void )
     
     alarmExpressionConfigList[eChamberTemperatureAbnormalAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E124,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E124,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E124,
         .alarmPopupEnable = true,
@@ -923,6 +1019,7 @@ void AlarmExpression_InitData( void )
     
     alarmExpressionConfigList[eTooMuchWaterInTheChamberAlarmId] = (AlarmExpressionConfig) {
         .alarmTitleStrId = string_AlarmTitle_E125,
+        .alarmDetailTiltleStrId = -1,
         .alarmDetailMsgStrStartId = string_AlarmMessage_E125,
         .alarmDetailMsgStrEndId = string_AlarmMessage_E125,
         .alarmPopupEnable = true,
@@ -997,19 +1094,25 @@ void AlarmExpression_InitVideoData()
 
 void AlarmExpression_Active(E_AlarmId id, E_AlarmPriority priority)
 {
+    DisplayControl_SetState(eMainScreenIsShowingDispState);
+    
     AlarmExpression_SetAlarmState(eInitAlarmState);
+        
     gs_alarmData.id = id;
     gs_alarmData.currentPriority = priority;
     gs_alarmData.status = eActive;
     
+    AlarmExpression_SetAlarmPopupAutoShowAtInit(true);
     AlarmExpression_SetAlarmMuteIconShowFlag(false);
     AlarmExpression_SetReset(false);
+    AlarmExpression_SetxShowAlarmDetailTitleTick(0);
 }
 
 void AlarmExpression_SetAlarmPriority(E_AlarmPriority priority)
 {
     gs_alarmData.currentPriority = priority;
 }
+
 E_AlarmPriority AlarmExpression_GetAlarmPriority()
 {
     return gs_alarmData.currentPriority;
@@ -1020,8 +1123,69 @@ void AlarmExpression_Inactive()
     gs_alarmData.status = eInactive;
 }
 
+/**@brief set tick of alarm detail title showing
+ * @param [in]: TickType_t val value of tick that wants to set
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_SetxShowAlarmDetailTitleTick(TickType_t val)
+{
+    xShowAlarmDetailTitleTick = val;
+}
+
+/**@brief set tick of alarm detail message showing
+ * @param [in]: TickType_t val value of tick that wants to set
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_SetShowAlarmDetailMessageTick(TickType_t val)
+{
+    xDetailMessageTick = val;
+}
+
+/**@brief set tick of alarm additional message showing
+ * @param [in]: TickType_t val value of tick that wants to set
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_SetShowAlarmAdditionalMessageTick(TickType_t val)
+{
+    xAdditionalMessageTick = val;
+}
+
+/**@brief Get new tick count when have action of touch screen
+ * @param [in]: None
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_ResetTouchScreenNoActionTickCounter(void)
+{
+    gs_alarmData.xTouchingScreenNoActionTick = xTaskGetTickCount();
+}
+
+/**@brief Check no action on touch screen timeout
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true if no action on touch screen timeout
+ * @retval false if no action on touch screen not timeout
+ */
+bool AlarmExpression_CheckTouchScreenNoActionTimeout(void)
+{
+    TickType_t delta = DisplayControl_CalculateDeltaTick(xTaskGetTickCount(), gs_alarmData.xTouchingScreenNoActionTick);
+    
+    if (delta >= ALARM_POPUP_TOUCHSCREEN_NO_ACTION_TIMEOUT)
+    {
+        gs_alarmData.xTouchingScreenNoActionTick = 0;
+        return true;
+    }
+    return false;
+}
+
 void AlarmExpression_ShowPopup()
 {
+    AlarmExpression_SetxShowAlarmDetailTitleTick(0);
+    alarmVideoControl.frameIndex = alarmVideoControl.frameTotal;
+    
     gs_alarmData.alarmState = eShowAlarmPopupAlarmState;
 }
 
@@ -1035,6 +1199,220 @@ bool AlarmExpression_IsPopupShow()
     return isAlarmPopupShow;
 }
 
+/**@brief set state of alarm detail title showing
+ * @param [in]: bool flag show or not
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_SetShowAlarmDetailTitle(bool flag)
+{
+    isAlarmDetailTitleShow = flag;
+}
+
+/**@brief set state of alarm detail title showing
+ * @param [in]: bool flag show or not
+ * @param [out]: None
+ * @retval true if want to show alarm detail title
+ * @retval false if don't want to show alarm detail title
+ */
+bool AlarmExpression_GetShowAlarmDetailTitle()
+{
+    return isAlarmDetailTitleShow;
+}
+
+/**@brief set state of alarm detail title showing
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true show alarm detail title done
+ * @retval false show alarm detail title not done
+ */
+bool AlarmExpression_IsShowAlarmDetailTitleDone()
+{
+//    SYS_PRINT("\n\nShow ALarm Title popup: %d - [%d] - state [%d]", xShowAlarmDetailTitleTick, AlarmExpression_GetShowAlarmDetailTitle(), gs_alarmData.alarmState);
+    if (AlarmExpression_GetShowAlarmDetailTitle())
+    {
+        SYS_PRINT("\nShow title");
+        if (xShowAlarmDetailTitleTick == 0) 
+        {
+            xShowAlarmDetailTitleTick = xTaskGetTickCount();
+            
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_TRUE);
+            laLabelWidget_SetHAlignment(lbAlarmInfomation, LA_HALIGN_CENTER);
+            laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(AlarmExpression_GetAlarmDetailTitleStringId(gs_alarmData.id)));
+            laWidget_Invalidate((laWidget*)rectAlarmArea);
+        }
+
+        if (xTaskGetTickCount() - xShowAlarmDetailTitleTick >= ALARM_TITLE_TIMEOUT)
+        {
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_FALSE);
+//            laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(string_text_Nullstring));
+            AlarmExpression_SetShowAlarmDetailTitle(false);
+            alarmVideoControl.frameIndex = 0;
+            AlarmExpression_SetShowAlarmDetailMessage(true);
+            AlarmExpression_SetShowAlarmAdditionalMessage(true);
+        }
+    }
+    return !AlarmExpression_GetShowAlarmDetailTitle();
+}
+
+/**@brief Check valid of alarm detail Message
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true if message is valid
+ * @retval false if message is invalid
+ */
+bool AlarmExpression_IsShowAlarmDetailMessage()
+{
+    if (AlarmExpression_GetAlarmMessageStringId(gs_alarmData.id) != string_text_Nullstring)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+/**@brief Set showing state of alarm detail message
+ * @param [in]: bool is showing or not
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_SetShowAlarmDetailMessage(bool flag)
+{
+    isDetailMessageShow = flag;
+}
+
+/**@brief Get state of alarm detail message showing
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true if message is showing
+ * @retval false if message is not showing
+ */
+bool AlarmExpression_GetShowAlarmDetailMessage()
+{
+    if (!AlarmExpression_IsShowAlarmDetailMessage())
+        return false;
+    return isDetailMessageShow;
+}
+
+/**@brief Set showing state of alarm Additional message
+ * @param [in]: bool is showing or not
+ * @param [out]: None
+ * @return None
+ */
+void AlarmExpression_SetShowAlarmAdditionalMessage(bool flag)
+{
+    isAdditionalMessageShow = flag;
+}
+
+/**@brief Get state of alarm Additional message showing
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true if message is showing
+ * @retval false if message is not showing
+ */
+bool AlarmExpression_GetShowAlarmAdditionalMessage()
+{
+    if (!gs_alarmData.alarmAdditionalMessageEnable)
+        return false;
+    return isAdditionalMessageShow;
+}
+
+/**@brief Get message timing
+ * @param [in]: None
+ * @param [out]: None
+ * @return uint16_t time of showing message
+ */
+uint16_t AlarmExpression_GetMessageTime()
+{
+    if (AlarmExpression_IsShowAlarmDetailMessage() && gs_alarmData.alarmAdditionalMessageEnable)
+    {
+        return MESSAGE_TIMEOUT_5S;
+    }
+    else
+    {
+        return MESSAGE_TIMEOUT_10S;
+    }
+}
+
+/**@brief Show alarm message
+ * @param [in]: None
+ * @param [out]: None
+ * @retval true alarm message is show completely
+ * @retval false alarm message is still showing
+ */
+bool AlarmExpression_ShowAlarmMessage()
+{
+    static uint16_t gs_messageDisplayTime = 0;
+    
+    gs_messageDisplayTime = AlarmExpression_GetMessageTime();
+    
+    if (!AlarmExpression_IsShowAlarmDetailMessage() && !gs_alarmData.alarmAdditionalMessageEnable)
+    {
+        return true;
+    }
+    if (AlarmExpression_GetShowAlarmDetailMessage())
+    {
+        if (xDetailMessageTick == 0)
+        {
+            xDetailMessageTick = xTaskGetTickCount();
+            AlarmExpression_SetShowAlarmAdditionalMessage(false);
+            
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_TRUE);
+            laWidget_SetPosition((laWidget*)lbAlarmInfomation, 24, 1);
+            laLabelWidget_SetHAlignment(lbAlarmInfomation, LA_HALIGN_LEFT);
+            laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(AlarmExpression_GetAlarmMessageStringId(gs_alarmData.id)));
+            laWidget_Invalidate((laWidget*)rectAlarmArea);
+        }
+        
+        if (xTaskGetTickCount() - xDetailMessageTick >= gs_messageDisplayTime)
+        {
+            laWidget_SetPosition((laWidget*)lbAlarmInfomation, 9, 1);
+            laLabelWidget_SetHAlignment(lbAlarmInfomation, LA_HALIGN_CENTER);
+//            laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(string_text_Nullstring));
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_FALSE);
+            AlarmExpression_SetShowAlarmDetailMessage(false);
+            AlarmExpression_SetShowAlarmAdditionalMessage(true);
+            
+            if (!gs_alarmData.alarmAdditionalMessageEnable)
+            {
+                return true;
+            }
+        }
+        else
+        {
+        }
+    }
+    
+    if (AlarmExpression_GetShowAlarmAdditionalMessage())
+    {
+        if (xAdditionalMessageTick == 0)
+        {
+            xAdditionalMessageTick = xTaskGetTickCount();
+            AlarmExpression_SetShowAlarmDetailMessage(false);
+            
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_TRUE);
+            laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(string_AlarmMessage_AdditionalMessage_RemoveTheCannula));
+            laWidget_Invalidate((laWidget*)rectAlarmArea);
+        }
+        
+        if (xTaskGetTickCount() - xAdditionalMessageTick >= gs_messageDisplayTime)
+        {
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_FALSE);
+//            laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(string_text_Nullstring));
+            AlarmExpression_SetShowAlarmDetailMessage(false);
+            AlarmExpression_SetShowAlarmAdditionalMessage(false);
+          
+            return true;
+        }
+        else
+        {
+            
+        }
+    }
+    return false;
+}
 void AlarmExpression_SetIndicatorVisible(bool flag)
 {
     laBool f;
@@ -1268,13 +1646,17 @@ void AlarmExpression_FrameUpdateCallback ( uintptr_t context, uint32_t currTick)
 /** @brief Handle the behavior when AlarmReporing Process is working */
 void AlarmExpression_Run(void) 
 {
+//    SYS_PRINT("\nAlarm state: [%d]", gs_alarmData.alarmState);
     switch (gs_alarmData.alarmState)
     {
         case eInactiveAlarmState:
-//            SYS_PRINT("\n eInactiveAlarmState ");
+        {
+            SYS_PRINT("\n eInactiveAlarmState ");
+        }
             break;
         case eIdleAlarmState:     
 //            SYS_PRINT("\n eIdleAlarmState ");
+        {
             if (gs_alarmData.status == eInactive)
             {
                 if (AlarmExpression_IsPopupShow())
@@ -1287,13 +1669,28 @@ void AlarmExpression_Run(void)
                 }
                 break;
             }
+            
             if (AlarmExpression_IsReset())
             {
                 gs_alarmData.alarmState = eHideAlarmPopupAlarmState;
                 break;
             }
+            if (AlarmExpression_IsPopupShow() && (GT911_GetTouchScreenState() != eTouchIdleStateID))
+            {
+                AlarmExpression_ResetTouchScreenNoActionTickCounter();
+            }
+            
+            if(AlarmExpression_IsPopupShow() && AlarmExpression_CheckTouchScreenNoActionTimeout())
+            {
+                // Hide alarm popup
+                gs_alarmData.alarmState = eHideAlarmPopupAlarmState;
+            }
+            
             if (AlarmExpression_GetAlarmPopupShowFlag())
             {
+                if(!AlarmExpression_IsShowAlarmDetailTitleDone())
+                    break;
+                    
                 if (alarmExpressionConfigList[gs_alarmData.id].alarmDetailAnimationEnable)
                 {
                     //decode frame
@@ -1314,66 +1711,36 @@ void AlarmExpression_Run(void)
 
                     if (alarmVideoControl.frameIndex >= alarmVideoControl.frameTotal)
                     {
-                        if (gs_alarmData.alarmAdditionalMessageEnable)
+                        // Alarm show message
+                        if (AlarmExpression_ShowAlarmMessage())
                         {
-                            static bool isVideoJustComplete = true;
-                            static TickType_t xAdditionalMessageTick;
-                            if (isVideoJustComplete)
-                            {
-                                isVideoJustComplete = false;
-                                xAdditionalMessageTick = xTaskGetTickCount();
-                                laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_TRUE);
-                                laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(string_AlarmMessage_AdditionalMessage_RemoveTheCannula));
-                                laWidget_Invalidate((laWidget*)rectAlarmArea);
-                            }
-                            else
-                            {
-                                if (xTaskGetTickCount() - xAdditionalMessageTick >= ADDITIONAL_MESSAGE_TIMEOUT)
-                                {
-                                    alarmVideoControl.frameIndex = 0;
-                                    isVideoJustComplete = true;
-                                    laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_FALSE);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            alarmVideoControl.frameIndex = 0;
+                            
+                            AlarmExpression_SetShowAlarmAdditionalMessageTick(0);
+                            AlarmExpression_SetShowAlarmDetailMessageTick(0);
+                            AlarmExpression_SetxShowAlarmDetailTitleTick(0);
+                            AlarmExpression_SetShowAlarmDetailTitle(true);
                         }
                     }
                 }
                 else
                 {
-                    if (gs_alarmData.alarmAdditionalMessageEnable)
+                    // Alarm show message
+                    if(AlarmExpression_ShowAlarmMessage())
                     {
-                        static bool isAdditionalMessageDisplay = false;
-                        static TickType_t xAdditionalMessageTick = 0;
-                        if (isAdditionalMessageDisplay)
-                        {
-                            if (xTaskGetTickCount() - xAdditionalMessageTick >= ADDITIONAL_MESSAGE_TIMEOUT)
-                            {
-                                laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(string_AlarmMessage_AdditionalMessage_RemoveTheCannula));
-                                isAdditionalMessageDisplay = false;
-                                xAdditionalMessageTick = xTaskGetTickCount();
-                            }
-                        }
-                        else
-                        {
-                            if (xTaskGetTickCount() - xAdditionalMessageTick >= ADDITIONAL_MESSAGE_TIMEOUT)
-                            {
-                                laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(AlarmExpression_GetAlarmMessageStringId(gs_alarmData.id)));
-                                isAdditionalMessageDisplay = true;
-                                xAdditionalMessageTick = xTaskGetTickCount();
-                            }
-                        }
+                        AlarmExpression_SetShowAlarmAdditionalMessageTick(0);
+                        AlarmExpression_SetShowAlarmDetailMessageTick(0);
+                        AlarmExpression_SetxShowAlarmDetailTitleTick(0);
+                        AlarmExpression_SetShowAlarmDetailTitle(true);
                     }
                 }
             }
             AlarmExpression_UpdateAlarmMuteIcon();
-                        
+        }           
             break;
         case eInitAlarmState:
-
+        {
+            SYS_PRINT("\nAlarm Init state");
+            
             if (gs_alarmData.status == eInactive)
             {
                 gs_alarmData.alarmState = eInactiveAlarmState;
@@ -1388,44 +1755,43 @@ void AlarmExpression_Run(void)
                 break;
             }
             
+            
 //            SYS_PRINT("\n eInitAlarmState ");
             AlarmExpression_SetIndicatorVisible(true);
             laWidget_SetVisible((laWidget*) panelAlarmTitle, LA_TRUE);
             AlarmExpression_UpdateAlarmTitle();
             AlarmExpression_UpdateAlarmIndicator();
+            
             AlarmExpression_UpdateAlarmPopup();
+            
             
             if (alarmExpressionConfigList[gs_alarmData.id].alarmDetailAnimationEnable)
             {
                 AlarmExpression_VideoInit(&alarmVideoControl, alarmExpressionConfigList[gs_alarmData.id].alarmAnimationData);
             }
             // show popup if any
+            
             if (AlarmExpression_GetAlarmPopupAutoShowAtInit())
             {
                 gs_alarmData.alarmState = eShowAlarmPopupAlarmState; 
-                AlarmExpression_SetAlarmPopupAutoShowAtInit(false);
+                AlarmExpression_SetAlarmPopupAutoShowAtInit(false);// false -> true;
             }
             else
             {
                 gs_alarmData.alarmState = eIdleAlarmState; 
             }
+        }
             break;
         case eShowAlarmPopupAlarmState:
+        {
             if (!alarmExpressionConfigList[gs_alarmData.id].alarmPopupEnable)
             {
                 gs_alarmData.alarmState = eIdleAlarmState;
                 break;
             }
             
-            if (DisplayControl_GetActiveScreenIndex() == MainScreen_ID)
-            {
-                laWidget_SetVisible((laWidget*)imgAlarmHandIndicator, LA_FALSE);
-
-            }
-            else if (DisplayControl_GetActiveScreenIndex() == SettingScreen_ID)
-            {
-                laWidget_SetVisible((laWidget*)SC_AlarmHandIndicator, LA_FALSE);
-            }
+            AlarmExpression_ResetTouchScreenNoActionTickCounter();
+            
             MainScreen_SetMonitorPopupVisible(false);
             MainScreen_SetSettingPopupVisible(false);
             MainScreen_SetSettingPopupShow(false);
@@ -1438,27 +1804,43 @@ void AlarmExpression_Run(void)
             AnimationControl_StopAnim(g_AlarmBox_Anim_MoveIn);
             AnimationControl_StopAnim(g_AlarmBox_Anim_MoveOut);
             AnimationControl_StartAnim(g_AlarmBox_Anim_MoveIn);
+            AlarmExpression_SetxShowAlarmDetailTitleTick(0);
+            AlarmExpression_SetShowAlarmDetailTitle(true);
+            
             gs_alarmData.alarmState = eShowHideAnimationRunningAlarmState;
+        }
             break;
         case eHideAlarmPopupAlarmState:
+        {
             if (alarmExpressionConfigList[gs_alarmData.id].alarmDetailAnimationEnable)
             {
                 VideoControl_StopPlayVideo(&alarmVideoControl);
             }
+            
+            laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_FALSE);
+            
+            AlarmExpression_SetShowAlarmAdditionalMessageTick(0);
+            AlarmExpression_SetShowAlarmDetailMessageTick(0);
+            AlarmExpression_SetxShowAlarmDetailTitleTick(0);
+            AlarmExpression_SetShowAlarmDetailTitle(true);
+            
+            
             MainScreen_SetButtonPressedState(false);
             AnimationControl_StopAnim(g_ChangedSetpointArea_Anim);
             AnimationControl_StopAnim(g_AlarmBox_Anim_MoveIn);
             AnimationControl_StopAnim(g_AlarmBox_Anim_MoveOut);
             AnimationControl_StartAnim(g_AlarmBox_Anim_MoveOut);
             gs_alarmData.alarmState = eShowHideAnimationRunningAlarmState;
+        }
             break;
         case eShowHideAnimationRunningAlarmState:
+        {
             // wait until animation complete
             if (!isAlarmPopupMoving)
             {
                 if (isAlarmPopupShow)
                 {
-                    gs_alarmData.alarmState = ePlayAnimationAlarmState;
+                    gs_alarmData.alarmState = eShowAlarmDetailTitle;//ePlayAnimationAlarmState;
                 }
                 else
                 {
@@ -1479,26 +1861,62 @@ void AlarmExpression_Run(void)
                     }
                 }
             }
+        }
+            break;
+        case eShowAlarmDetailTitle:
+        {   
+            if (gs_alarmData.status == eInactive)
+            {
+                if (AlarmExpression_IsPopupShow())
+                {
+                    gs_alarmData.alarmState = eHideAlarmPopupAlarmState;
+                }
+                else
+                {
+                    gs_alarmData.alarmState = eCompleteAlarmState;
+                }
+                break;
+            }
+            
+            if (AlarmExpression_IsReset())
+            {
+                gs_alarmData.alarmState = eHideAlarmPopupAlarmState;
+                break;
+            }
+//            
+//            laWidget_Invalidate((laWidget*)rectAlarmArea);
+//            SYS_PRINT("\n\nShow ALarm Title popup: %d", xShowAlarmDetailTitleTick);
+            if(AlarmExpression_IsShowAlarmDetailTitleDone())
+            {
+                gs_alarmData.alarmState = ePlayAnimationAlarmState;
+            }
+        }
             break;
         case ePlayAnimationAlarmState:
+        {    
             if (alarmExpressionConfigList[gs_alarmData.id].alarmDetailAnimationEnable)
             {
                 VideoControl_StartPlayVideo(&alarmVideoControl);
             }
             gs_alarmData.alarmState = eIdleAlarmState;
+        }
             break;
         case eStopAnimationAlarmState:
             break;
         case eCompleteAlarmState:
+        {
             SYS_PRINT("\n eCompleteAlarmState \n");
             AlarmExpression_Deinit();
+        }
             break;
         case eResetAlarmState:
+        {
             if (gs_alarmData.status == eInactive)
             {
                 gs_alarmData.alarmState = eCompleteAlarmState;
                 break;
             }
+        }
             break;
         default:
             break;
@@ -1543,7 +1961,6 @@ void AlarmExpression_Deinit_SettingScreen()
     AlarmExpression_StopIndicatorTimer();
     AlarmExpression_SetIndicatorVisible(false);
     laWidget_SetVisible((laWidget*)SC_AlarmTitleBarPanel, LA_FALSE);
-    laWidget_SetVisible((laWidget*)SC_AlarmHandIndicator, LA_FALSE);
 
     gs_alarmData.alarmState = eInactiveAlarmState;
 }
@@ -1564,9 +1981,7 @@ void AlarmExpression_Deinit()
     laWidget_SetVisible((laWidget*) panelAlarmTitle, LA_FALSE);
     
 //    if (DisplayControl_GetActiveScreenIndex() == MainScreen_ID)
-//    {
-        laWidget_SetVisible((laWidget*)imgAlarmHandIndicator, LA_FALSE);
-        
+//    {        
 //    }
 //    else if (DisplayControl_GetActiveScreenIndex() == SettingScreen_ID)
 //    {
@@ -1619,13 +2034,11 @@ void AlarmExpression_UpdateAlarmTitle(void)
     {
         labelWidget = labelAlarmTitle;
         panelWidget = panelAlarmTitle;
-        imgWidget   = imgAlarmHandIndicator;
     }
     else if (DisplayControl_GetActiveScreenIndex() == SettingScreen_ID)
     {
         labelWidget = SC_AlarmTitleLabel;
         panelWidget = SC_AlarmTitleBarPanel;
-        imgWidget   = SC_AlarmHandIndicator;
     }
     else{
         return;
@@ -1689,7 +2102,7 @@ void AlarmExpression_UpdateAlarmPopup(void)
     if (gs_alarmData.id > eLastAlarmId || gs_alarmData.id < 0)
     return;
 
-    laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(AlarmExpression_GetAlarmMessageStringId(gs_alarmData.id)));
+    laLabelWidget_SetText(lbAlarmInfomation, laString_CreateFromID(AlarmExpression_GetAlarmDetailTitleStringId(gs_alarmData.id)));
     laWidget_SetVisible((laWidget*)lbAlarmInfomation, LA_TRUE);     
     
     if (alarmExpressionConfigList[gs_alarmData.id].alarmPopupEnable)
@@ -1711,7 +2124,7 @@ void AlarmExpression_UpdateResetButton(){
     if (alarmExpressionConfigList[gs_alarmData.id].alarmResetButtonEnable || alarmExpressionConfigList[gs_alarmData.id].alarmOKButtonEnable)
     {
         laWidget_SetVisible((laWidget*)btnAlarmReset_AlarmArea, LA_TRUE);
-        laWidget_SetX((laWidget*)btnX_AlarmArea, 60);
+        laWidget_SetX((laWidget*)btnX_AlarmArea, 48);//60->49
         if (alarmExpressionConfigList[gs_alarmData.id].alarmOKButtonEnable)
         {
             laButtonWidget_SetPressedImage(btnAlarmReset_AlarmArea, &ButtonRound_OK);
@@ -1726,7 +2139,7 @@ void AlarmExpression_UpdateResetButton(){
     else
     {
         laWidget_SetVisible((laWidget*)btnAlarmReset_AlarmArea, LA_FALSE);
-        laWidget_SetX((laWidget*)btnX_AlarmArea, 105);
+        laWidget_SetX((laWidget*)btnX_AlarmArea, 88);//105->89
     }
     
     //this will override default config
@@ -1734,17 +2147,17 @@ void AlarmExpression_UpdateResetButton(){
     {
         case eResetButtonHide:
             laWidget_SetVisible((laWidget*)btnAlarmReset_AlarmArea, LA_FALSE);
-            laWidget_SetX((laWidget*)btnX_AlarmArea, 105);
+            laWidget_SetX((laWidget*)btnX_AlarmArea, 88);//105->89
             return;
         case eResetButtonShowReset:
             laWidget_SetVisible((laWidget*)btnAlarmReset_AlarmArea, LA_TRUE);
-            laWidget_SetX((laWidget*)btnX_AlarmArea, 60);
+            laWidget_SetX((laWidget*)btnX_AlarmArea, 48);//60->49
             laButtonWidget_SetPressedImage(btnAlarmReset_AlarmArea, &ButtonRound_Reset);
             laButtonWidget_SetReleasedImage(btnAlarmReset_AlarmArea, &ButtonRound_Reset);
             return;
         case eResetButtonShowOK:        
             laWidget_SetVisible((laWidget*)btnAlarmReset_AlarmArea, LA_TRUE);
-            laWidget_SetX((laWidget*)btnX_AlarmArea, 60);
+            laWidget_SetX((laWidget*)btnX_AlarmArea, 48);//60->49
             laButtonWidget_SetPressedImage(btnAlarmReset_AlarmArea, &ButtonRound_OK);
             laButtonWidget_SetReleasedImage(btnAlarmReset_AlarmArea, &ButtonRound_OK);
             return;
@@ -1795,6 +2208,17 @@ uint32_t AlarmExpression_GetAlarmMessageStringId(E_AlarmId id)
         return string_text_Nullstring;
 
     return alarmExpressionConfigList[id].alarmDetailMsgStrStartId + gs_alarmData.alarmDetailMsgStrOffsetId;
+}
+
+uint32_t AlarmExpression_GetAlarmDetailTitleStringId(E_AlarmId id)
+{
+    if (id > eLastAlarmId || id < 0)
+        return string_text_Nullstring;
+
+    if (alarmExpressionConfigList[id].alarmDetailTiltleStrId < 0)
+        return string_text_Nullstring;
+    
+    return alarmExpressionConfigList[id].alarmDetailTiltleStrId;
 }
 
 void AlarmExpression_AlarmAreaMoveInCallback(int state, int pos)

@@ -37,6 +37,7 @@
 
 /** @brief SQI Mounting Status */
 static Video_Data_Struct gs_videoscreenData;
+
 ///** @brief Playing startup sound counter*/
 //static uint16_t gs_startPlayStartupSoundTick = 0;
 ///** @brief Scheme variable for selfcheck screen*/
@@ -64,6 +65,8 @@ E_GuiResult VideoScreen_Initialize(void)
     gs_videoscreenData.startPlayStartupSoundTick = 0;
     gs_videoscreenData.currentScheme = eStartupCyanSchemeID;
     gs_videoscreenData.isStartupSoundPlaying = false;
+    gs_videoscreenData.xPreStatusBarTickCounter = 0;
+    gs_videoscreenData.xCurrentStatusBarTickCounter = 0;
     VideoScreen_SetIndicatorVisible(false);
     return eGCompleted;
 }
@@ -130,6 +133,8 @@ void VideoScreen_Run(void) {
 
             break;
         case eVideoControlCompleteState:
+        {
+            static uint16_t testTick = 0;
 //            SYS_PRINT("VideoScreen_Run - eFinishedVideoDispState\n");
             VideoControl_StopPlayVideo(&introVideoControl);
             unsigned long frame_add = (introVideoControl.frameTotal - 1) * introVideoControl.frameSizeInBytes ;
@@ -143,15 +148,44 @@ void VideoScreen_Run(void) {
             
             VideoScreen_SetIndicatorVisible(true);
             
-            if (gs_videoscreenData.loadingValue % 20 == 0)
+//            if (testTick == 0) testTick = xTaskGetTickCount();
+            
+            if (gs_videoscreenData.xPreStatusBarTickCounter == 0)
             {
-                VideoScreen_SetIndictorScheme(gs_videoscreenData.currentScheme);
-                gs_videoscreenData.currentScheme++;
-                if (gs_videoscreenData.currentScheme > eStartupRedSchemeID)
-                    gs_videoscreenData.currentScheme =  eStartupCyanSchemeID;
+//                gs_videoscreenData.loadingValue = 1;
+                gs_videoscreenData.xCurrentStatusBarTickCounter = xTaskGetTickCount();
+                gs_videoscreenData.xPreStatusBarTickCounter = gs_videoscreenData.xCurrentStatusBarTickCounter;
             }
-            gs_videoscreenData.loadingValue += 2;
-            delay_SoftDelay(95);
+            
+            if (gs_videoscreenData.loadingValue == 32)
+            {   
+//                SYS_PRINT("\nTick: [%d]", xTaskGetTickCount() - testTick);
+                gs_videoscreenData.currentScheme = eStartupYellowSchemeID;
+                VideoScreen_SetIndictorScheme(gs_videoscreenData.currentScheme);
+            }
+            else if (gs_videoscreenData.loadingValue == 64)
+            {   
+//                SYS_PRINT("\nTick: [%d]", xTaskGetTickCount() - testTick);
+                gs_videoscreenData.currentScheme = eStartupRedSchemeID;
+                VideoScreen_SetIndictorScheme(gs_videoscreenData.currentScheme);
+            }
+            else if (gs_videoscreenData.loadingValue >= 96)
+            {
+//                SYS_PRINT("\nTick: [%d]", xTaskGetTickCount() - testTick);
+                gs_videoscreenData.currentScheme = 0xFF;
+                VideoScreen_SetIndictorScheme(gs_videoscreenData.currentScheme);
+            }
+            
+            gs_videoscreenData.xCurrentStatusBarTickCounter = xTaskGetTickCount();
+            if (gs_videoscreenData.xCurrentStatusBarTickCounter - gs_videoscreenData.xPreStatusBarTickCounter >= 60)
+            {
+//                SYS_PRINT("\nCurrentTick: [%d]", xTaskGetTickCount());
+                gs_videoscreenData.loadingValue += 2;
+                gs_videoscreenData.xPreStatusBarTickCounter = gs_videoscreenData.xCurrentStatusBarTickCounter;
+                
+            }
+//            delay_SoftDelay(55);
+            
             laProgressBarWidget_SetValue(prgBarLoading, (uint32_t)gs_videoscreenData.loadingValue);
 
             JFLO_Slider_Scheme.textHighlight = 0x07FF;
@@ -169,6 +203,7 @@ void VideoScreen_Run(void) {
 //                SYS_PRINT("Video is finished, starting motor\n");
             }
             
+        }
             break;   
             
         default:
@@ -294,6 +329,14 @@ static void VideoScreen_SetIndictorScheme(E_SelfCheckIndicatorScheme_t schemeID)
         laWidget_SetScheme(panelSelfCheckIndicatorBottom, &JFLO_RedIndicator_Scheme);
     }
         break;
+    default:
+    {
+        laWidget_SetScheme(panelSelfCheckIndicatorLeft, &JFLO_Background_Scheme);
+        laWidget_SetScheme(panelSelfCheckIndicatorRight, &JFLO_Background_Scheme);
+        laWidget_SetScheme(panelSelfCheckIndicatorTop, &JFLO_Background_Scheme);
+        laWidget_SetScheme(panelSelfCheckIndicatorBottom, &JFLO_Background_Scheme);
+    }   
+    break;
     }
 }
 

@@ -84,6 +84,13 @@ extern "C" {
      *  @retval false touch module is OK
      */
     bool GT911_IsTouchFailure();
+    
+    /** @brief Read state of GT911
+    *  @param [in]  None   
+    *  @param [out]  None
+    *  @return E_GT911StateID state of touch screen
+    */
+    E_GT911StateID GT911_GetTouchScreenState();
 
     /* Provide C++ Compatibility */
 #ifdef __cplusplus

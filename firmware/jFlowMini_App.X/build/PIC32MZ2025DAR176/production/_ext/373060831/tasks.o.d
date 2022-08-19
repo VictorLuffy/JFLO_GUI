@@ -11,7 +11,11 @@ build/PIC32MZ2025DAR176/production/_ext/373060831/tasks.o: \
  ../../../../../third_party/rtos/FreeRTOS/Source/include/list.h \
  ../../../../../third_party/rtos/FreeRTOS/Source/include/timers.h \
  ../../../../../third_party/rtos/FreeRTOS/Source/include/task.h \
- ../../../../../third_party/rtos/FreeRTOS/Source/include/stack_macros.h
+ ../../../../../third_party/rtos/FreeRTOS/Source/include/stack_macros.h \
+ ../../../../../framework/System/debug/sys_debug.h \
+ ../../../../../framework/system/system.h \
+ ../../../../../framework/system/common/sys_common.h \
+ ../../../../../framework/system/common/sys_module.h
 
 ../../../../../third_party/rtos/FreeRTOS/Source/include/FreeRTOS.h:
 
@@ -36,3 +40,11 @@ build/PIC32MZ2025DAR176/production/_ext/373060831/tasks.o: \
 ../../../../../third_party/rtos/FreeRTOS/Source/include/task.h:
 
 ../../../../../third_party/rtos/FreeRTOS/Source/include/stack_macros.h:
+
+../../../../../framework/System/debug/sys_debug.h:
+
+../../../../../framework/system/system.h:
+
+../../../../../framework/system/common/sys_common.h:
+
+../../../../../framework/system/common/sys_module.h:

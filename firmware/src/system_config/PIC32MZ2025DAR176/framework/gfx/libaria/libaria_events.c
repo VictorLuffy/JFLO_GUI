@@ -213,7 +213,7 @@ void btnO2_SelectToSetting_2_PressedEvent(jfloButtonWidget* btn)
     MainScreen_SetSettingQuatity(eFiO2SettingId);
     MainScreen_SetSubstate(eSettingChangedDispSubstate);
     MainScreen_ResetButtonNoActionTickCounter();
-    MainScreen_o2FlowNoChangeTickCounter();
+    MainScreen_o2FlowChangeTickCounter();
 }
 
 // btnMinus - PressedEvent
@@ -919,6 +919,7 @@ void btnTestMediumAlarm_MaintenanceScreen_PressedEvent(laButtonWidget* btn)
 {
 //    alarmID = alarmID == eBreathingCircuitNotConnectedAlarmId ? eCheckConnectionChamberAlarmId : eBreathingCircuitNotConnectedAlarmId;
     SYS_PRINT("\nIncrease AlarmID %d", count);
+//#define JFLO_DEBUG_ALARM
 #ifdef JFLO_DEBUG_ALARM
     count++;
     alarmStatus = eInactive;

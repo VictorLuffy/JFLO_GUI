@@ -241,6 +241,7 @@ void SettingScreen_Run(void)
 {   
     // Update alarm
     AlarmExpression_Run_SettingScreen();
+//    AlarmExpression_Run();
     
     // Update running time
     RunningBar_DisplayRunningTime(false);

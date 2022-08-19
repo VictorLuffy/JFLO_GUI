@@ -19,7 +19,7 @@ typedef uint32_t TickType_t;
 #include "Device/RTC_BQ32002.h"
 #include "Alarm/AlarmInterface.h"
 
-//#define JFLO_DEBUG_GUI
+#define JFLO_DEBUG_GUI
 
 /** @brief Num of ticks is equivalent to 1ms - CPUCLK/2 = 100Mhz  */   
 #define TICKS_PER_MS       100000        // 1ms

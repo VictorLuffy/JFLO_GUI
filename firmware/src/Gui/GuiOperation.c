@@ -351,6 +351,8 @@ void guiTask_HandleEvent(void)
 
 void GUI_Task(void)
 {
+//    static uint16_t testTick = 0;
+//    if (testTick == 0) testTick = xTaskGetTickCount();
     //Handle touch Screen
     GT911_Task();
     //Handle system input, including touch event
@@ -378,6 +380,7 @@ void GUI_Task(void)
     if (xGuiTick > 100)
         SYS_PRINT("LibAria_Tasks execution %d\n",xGuiTick); 
 #endif    
+//    SYS_PRINT("\nGUI Task Tick: %d", xTaskGetTickCount() - testTick);
     return;
 }
 

@@ -4249,8 +4249,23 @@ void alarmMgr_InitAlarm(void)
 
 void alarmMgr_CheckAllAlarm(void)
 #define U_TEST
-//#undef TEST
+#undef U_TEST
 #ifndef U_TEST
+{
+//    s_alarmList[eDeviceErrorToAchieveTargetTemperatureAlarmId].currentStatus = eActive;
+    static uint16_t count = 0;
+    if (count < 10)
+    {
+        count++;
+    }
+    else
+    {
+        s_alarmList[eBreathingCircuitNotConnectedAlarmId].currentStatus = eActive;
+//        s_alarmList[eBreathingCircuitNotConnectedAlarmId].data[eAdditionalMessageDataIdx] = eEnableAdditionalMessage;
+        s_alarmList[eBreathingCircuitNotConnectedAlarmId].data[eResetButtonStatusDataIdx] = eResetButtonShowReset;
+    }
+//    SYS_PRINT("\nCount: %d", count);
+}
 #else
 {
 //    s_alarmList[eFailureLCDTouchModuleAlarmId].currentStatus = eActive;
