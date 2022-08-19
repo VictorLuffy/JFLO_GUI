@@ -1,0 +1,264 @@
+/* ************************************************************************** */
+/** @file [UART_2.c]
+ *  @brief { control read/write data via UART_2}
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include "system_config.h"
+#include "system_definitions.h"
+#include "system/common/sys_common.h"
+
+
+#include "UART_2.h"
+#include "AlarmInterface.h"
+#include "ApplicationDefinition.h"
+
+
+/** @brief UART2 index on Harmony configuration */
+#define UART2_DRIVER_INDEX                 1
+
+/** @brief UART2 disable transmitter interrupt */
+#define UART2_DISABLE_TX_INT	SYS_INT_SourceDisable(INT_VECTOR_UART2_TX)
+
+/** @brief UART2 enable transmitter interrupt */
+#define UART2_ENABLE_TX_INT		SYS_INT_SourceEnable(INT_VECTOR_UART2_TX)
+
+/** @brief UART2 disable receiver interrupt */
+#define UART2_DISABLE_RX_INT	SYS_INT_SourceDisable(INT_VECTOR_UART2_RX)
+
+/** @brief UART2 enable receiver interrupt */
+#define UART2_ENABLE_RX_INT		SYS_INT_SourceEnable(INT_VECTOR_UART2_RX)
+
+/** @brief UART2 transmitter buffer size */
+#define UART2_TX_BUFFER_SIZE    512
+
+/** @brief UART2 receiver buffer size */
+#define UART2_RX_BUFFER_SIZE    256
+
+
+
+/** @brief UART2 port handle */
+static DRV_HANDLE s_Uart2Handle = DRV_HANDLE_INVALID;
+
+/** @brief Flag indicate UART2 has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_Uart2Error = eDeviceNoError;
+
+/** @brief UART2 RX buffer handle */
+static DRV_USART_BUFFER_HANDLE s_Uart2RxBufferHandle;
+
+/** @brief UART2 transmitter buffer pointer, indicate the start address of the 
+ * packet locate on Uart2TxBuffer[] to be sent */
+static uint16_t Uart2TxBuffPtr = 0;
+
+/** @brief UART2 transmitter buffer, all data need to be transmitted will locate 
+ * here and wait for sending. To avoid data over-written while it is not sent yet,
+ make sure the buffer is large enough */
+static uint8_t __attribute__((coherent)) Uart2TxBuffer[UART2_TX_BUFFER_SIZE] = {'\0'};
+
+/** @brief UART2 receiver buffer, all received data will be located here and wait 
+ * for reading out. To avoid data over-written while it is not reading out yet,
+ make sure the buffer is large enough. A command to read out data will empty that
+ buffer. The buffer full while the UART receiver keep continue to receive data 
+ may crash system */
+static uint8_t __attribute__((coherent)) Uart2RxBuffer[UART2_RX_BUFFER_SIZE] = {'\0'};
+
+/** @brief internal functions declaration */
+static bool Uart2_AttachReceiveBuffer();
+static void Uart2_ReportError();
+
+/** @brief Initialize UART2, use to communicate with SPO2 sensor. This function 
+ * open UART2 as none blocking, read/write enable and attached a buffer to store
+ * receive data from UART receiver
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void Uart2_Initialize() {
+    //open UART2 port
+    if (s_Uart2Handle == DRV_HANDLE_INVALID) {
+        s_Uart2Handle = DRV_USART_Open(UART2_DRIVER_INDEX, DRV_IO_INTENT_READWRITE | DRV_IO_INTENT_NONBLOCKING);
+        if (DRV_HANDLE_INVALID == s_Uart2Handle) {
+            //set error flag
+            s_Uart2Error = eDeviceErrorDetected;
+            //report error
+            Uart2_ReportError();
+            return;
+        }
+    }
+
+    //attach receive buffer 
+    Uart2_AttachReceiveBuffer();
+    
+    //clear variables
+    s_Uart2Error = eDeviceNoError;
+}
+
+/** @brief Send a packet of data through UART2
+ * The data to send will not immediately put on UART2 port, it will store on Uart2TxBuffer
+ * queue. Data on that Uart2TxBuffer queue will be put serially first in first out
+ *  @param [in]  void *txData: pointer to data packet need to be sent
+ *               uint16_t len: size of data packet 
+ *  @param [out]  None
+ *  @return None
+ *  @retval true prepare for sending OK
+ *  @retval false some error happen, may be the size of packet data too large compare
+ * with Uart2TxBuffer or can not put the data on queue
+ */
+bool Uart2_Send(uint8_t* txData, uint16_t len) {
+    //check for error
+    if (s_Uart2Error != eDeviceNoError) {
+        Uart2_ReportError();
+        return false;
+    }
+    
+    //send data
+    DRV_USART_BUFFER_HANDLE bufferHandle;
+    if (len > 0 && len < UART2_TX_BUFFER_SIZE) {
+        if (len + Uart2TxBuffPtr >= UART2_TX_BUFFER_SIZE) {
+            Uart2TxBuffPtr = 0;
+        }
+
+        memcpy(&Uart2TxBuffer[Uart2TxBuffPtr], txData, len);
+
+        DRV_USART_BufferAddWrite(s_Uart2Handle, &bufferHandle, (void *) &Uart2TxBuffer[Uart2TxBuffPtr], len);
+
+        if (bufferHandle == DRV_USART_BUFFER_HANDLE_INVALID) {
+            //set error flag
+            s_Uart2Error = eDeviceErrorDetected;
+            //report error
+            Uart2_ReportError();
+            return false;
+        }
+        else {
+            //adjust pointer
+            Uart2TxBuffPtr += len;
+            return true;
+        }
+    } 
+    else {
+        return false;
+    }
+}
+
+/** @brief Read UART2 receive buffer and store on external buffer
+ * After reading out, the UART2 Uart2RxBuffer will empty
+ *  @param [in]  uint8_t *rxBuffer: pointer to external buffer to store receive data
+ *               uint16_t len: length of external buffer
+ *  @param [out]  None
+ *  @return int16_t     (>0)number of byte successful read
+ *                      (-1) if error occur
+ */
+int16_t Uart2_ReadReceiveBuffer(uint8_t* rxBuffer, int16_t len) {
+    //check for error
+    if (s_Uart2Error != eDeviceNoError) {
+        Uart2_ReportError();
+        return -1;
+    }
+    
+    //disable interrupt to prevent new data come
+    UART2_DISABLE_RX_INT;
+    //get number of byte already received
+    size_t processedBytes = DRV_USART_BufferCompletedBytesGet(s_Uart2RxBufferHandle);
+
+    if (processedBytes <= 0) {      //empty or invalid returned
+        UART2_ENABLE_RX_INT;
+        return 0;
+    }
+
+    if (len < processedBytes) {
+        UART2_ENABLE_RX_INT;
+        return -1; //error
+    }
+
+    //remove buffer handle
+    DRV_USART_BUFFER_RESULT bufferResult;
+    bufferResult = DRV_USART_BufferRemove(s_Uart2RxBufferHandle);
+    if (DRV_USART_BUFFER_RESULT_REMOVED_SUCCESFULLY == bufferResult) {
+        //Buffer removed successful from the queue
+        //copy data from temporary buffer to external buffer
+        memcpy(rxBuffer, &Uart2RxBuffer[0], processedBytes);
+        //register receive buffer queue again
+        Uart2_AttachReceiveBuffer();
+        //re-enable interrupt
+        UART2_ENABLE_RX_INT;
+
+        return processedBytes;
+    }
+    else {
+        //Either buffer is invalid or expired.
+        //set error flag
+        s_Uart2Error = eDeviceErrorDetected;
+        //report error
+        Uart2_ReportError();
+
+        UART2_ENABLE_RX_INT;
+        return -1; //error
+    }
+}
+
+/** @brief Attach Uart2RxBuffer to UART2 Receiver. Data from UART2 Receiver will store
+ * on attached buffer
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return         None
+ *  @retval true attaching buffer OK
+ *  @retval false can not attach buffer to UART2 Receiver
+ */
+bool Uart2_AttachReceiveBuffer() {
+    DRV_USART_BufferAddRead(s_Uart2Handle, &s_Uart2RxBufferHandle, &Uart2RxBuffer[0], UART2_RX_BUFFER_SIZE);
+    if (DRV_USART_BUFFER_HANDLE_INVALID == s_Uart2RxBufferHandle) {
+        // Error handling here
+        //set error flag
+        s_Uart2Error = eDeviceErrorDetected;
+        //report error
+        Uart2_ReportError();
+        return false;
+    }
+    return true;
+}
+
+/** @brief Query how may byte available on UART2 Receiver buffer
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return         size_t      (>0) number of byte available
+ *                              (DRV_USART_BUFFER_HANDLE_INVALID) can not get size
+ */
+size_t Uart2_GetReceiveBufferSize () {
+    size_t processedBytes = DRV_USART_BufferCompletedBytesGet(s_Uart2RxBufferHandle);
+    return processedBytes;
+}
+ 
+/** @brief report error if occur during communication via UART2, may be send event
+ * to Alarm task
+ *  @param [in]  None 
+ *  @param [out]  None
+ *  @return None
+ */
+void Uart2_ReportError() {
+        //check whether an error is detected, then send event to ALarm task
+    if (s_Uart2Error == eDeviceErrorDetected) {
+        //send event to alarm task
+        alarmInterface_SendEvent(eUart2ErrorAlarm, eActive, eHighPriority, 0);
+        SYS_PRINT("\n error at: Uart2_ReportError");
+        //change state
+        s_Uart2Error = eDeviceErrorReported;
+    }
+}
+
+
+/* *****************************************************************************
+ End of File
+ */

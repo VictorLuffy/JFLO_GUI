@@ -1,0 +1,858 @@
+/* ************************************************************************** */
+/** @file [MotorTask.c]
+ *  @brief {This file contain source code necessary for Motor Control. It implements
+ * a Motor Task, handle event come to Motor Task, initialize dependency
+ * components such as Blower, Flow sensors and control them during operation }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+/* This section lists the other files that are included in this file.
+ */
+#include "ApplicationDefinition.h"
+
+#include <float.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+
+#include "MotorTask.h"
+#include "SDP31_AirFlowSensor.h"
+#include "SDP31_O2FlowSensor.h"
+#include "PWM_Motor.h"
+#include "DRV8308.h"
+#include "KalmanLPF.h"
+#include "PC_Monitoring.h"
+#include "FlowController.h"
+#include "HeaterTask.h"
+#include "AlarmInterface.h"
+#include "GuiOperation.h"
+#include "GuiInterface.h"
+#include "Setting.h"
+
+/** @brief MOTOR CONTROL task priority */
+#define		MOTOR_TASK_PRIORITY		(tskIDLE_PRIORITY + 3)
+
+/** @brief MOTOR CONTROL task stack size */
+#define 	MOTOR_TASK_STACK			(2*1024)        //1K Words = 4KB
+
+/** @brief MOTOR CONTROL task queue size */
+#define 	MOTOR_QUEUE_SIZE			(16)
+
+/** @brief MOTOR CONTROL task periodic */
+#define 	MOTOR_TASK_PERIODIC_MS      (/*10*/10 / portTICK_PERIOD_MS)
+
+/** @brief MOTOR CONTROL max time to wait while sending data to queue  */
+#define 	MOTOR_QUEUE_MAX_WAIT_MS     (2 / portTICK_PERIOD_MS)
+
+/** @brief  Maximum time to wait for MUTEX to get public data */
+#define 	MOTOR_MUTEX_MAX_WAIT		(2 / portTICK_PERIOD_MS)         //5ms
+
+/** @brief  Query MOTOR lock status */
+//#define MOTOR_IS_LOCKED     (!MOTOR_LOCK_INPUTStateGet())
+
+/** @brief  Query MOTOR fault status */
+//#define MOTOR_IS_FAULT      (!MOTOR_FAULT_INPUTStateGet())
+
+#define MOTOR_INIT_FLOWRATE     10
+
+/** @brief define state machine for Flow control task */
+typedef enum {
+    
+    /**< Idle state. In this state, Motor has been turned off, there are no 
+     * control here */
+    eMotorIdleState = 0,
+            
+    /**< Start state. In this state, turn on the motor by tuning on the ENBALE PIN
+     * on DRV8308, then wait for motor to spin. Motor can be start success or failed. 
+     * If failed, we should try again */
+    eMotorStartState,
+ 
+    /**< Prepare before operate. In this state, The motor has been stared and prepare
+     * to go to operate state. Depend on operation mode, this state will do some
+     * peparation before enter operation */
+    eMotorPreOperateState,
+            
+    /**< Power Control state. In this state, Motor has been started and run a close
+     * loop control depend on operation mode */
+    eMotorOperateState,
+            
+            
+     /**< Prepare before stop. In this state, The motor prepare
+     * to go to stop state. It checks chamber outlet tempature drops below 30 ° C to stop motor */
+    eMotorPreStopState,
+            
+    /**< Stop state. In this state, the ENABLE PIN on DRV8308 will be turned to LOW 
+     * and BRAKE PIN will be turned HIGH */
+    eMotorStopState,
+            
+    /**< ERROR state. In this state, MOTOR has detected some error and should report
+     * to ALARM task in this state. After reporting, Motor should return to IDLE state */
+    eMotorErrorState,
+            
+} E_MotorState;
+
+/** @brief MUTEX to protect Motor Data  sharing */
+static SemaphoreHandle_t s_MotorDataMutex = NULL;
+
+/** @brief MOTOR CONTROL task Queue */
+static QueueHandle_t s_MotorQueue;
+
+/** @brief Air flow (LPM) obtained from Air Flow Sensor and bypass a LPF */
+static float s_AirFlow = 0;
+
+/** @brief O2 flow (LPM) obtained from O2 Flow Sensor and bypass a LPF */
+static float s_O2Flow = 0;
+
+/** @brief O2 flow (LPM) obtained from O2 Flow Sensor and bypass a LPF */
+static float s_TotalFlow = 0;
+
+/** @brief Motor output, in percent of power (0 -> 100%) */
+static float s_MotorOutput = 0;
+
+/** @brief Variable to hole Motor control status, useful for state machine of 
+ * controller*/
+static E_MotorState s_MotorCtrlState = eMotorIdleState;
+
+/** @brief Motor operation mode, indicate which operation mode should perform:
+ * Power control/ Speed Control/ Flow Control */
+static E_MotorOperationMode s_MotorOperMode = eMotorFlowCtrlMode;
+
+/** @brief Target power, use when running Power control loop */
+static float s_MotorTargetPower = 0;
+
+/** @brief Target Speed, use when running Speed control loop */
+static float s_MotorTargetSpeed = 0;
+
+/** @brief Target Flow, use when running Flow control loop */
+static float s_MotorSettingFlow = MOTOR_INIT_FLOWRATE;
+
+static float s_MotorOperatingFlow = MOTOR_INIT_FLOWRATE;
+
+/** @brief Kalman Low pass filter support for Motor control task. This filter support 3 input
+ * sample for Air Flow, O2 Flow and Total Flow. Each input sample use different 
+ * filter's coefficients */
+static KALMAN_LPF_t s_MotorLPF;
+
+/** @brief Motor task time tick, use as reference to perform a real time task */
+static TickType_t s_MotorTaskWakeTime;
+
+/** @brief Motor task Public data for sharing */
+static MOTOR_PUBLIC_DATA_t s_MotorPublicData;
+
+/** @brief Flag indicate Motor has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_MotorError = eDeviceNoError;
+
+
+/** @brief Flag indicate Motor enable/disable state
+ * true mean motor is enabled
+ * false mean motor is disable */
+
+static bool s_MotorEnabledState = true;
+
+
+
+
+/** @brief local functions  */
+static void MotorTask_Func(void);
+//static void MotorTask_HandleEvent(void);
+//static void MotorTask_Maintain(void);
+
+static bool MotorTask_Start();
+static bool MotorTask_Stop();
+static void MotorTask_PreOperate();
+static bool MotorTask_Operate();
+static void MotorTask_RampUp();
+
+
+
+/** @brief Support API to send event to MOTOR CONTROL task from other tasks
+ *  @param [in]     MOTOR_CTRL_EVENT_t event    event to send  
+ *  @param [out]  None
+ *  @return None
+ *  @retval true sending event to MOTOR CONTROL queue OK
+ *  @retval false sending event to MOTOR CONTROL queue ERROR
+ */
+inline bool MotorTask_SendEvent(MOTOR_CTRL_EVENT_t event) {
+    //return value
+    bool rtn = true;
+    //send event
+    if (xQueueSendToBack(s_MotorQueue, &event, MOTOR_QUEUE_MAX_WAIT_MS) != pdPASS) {
+        xQueueReset(s_MotorQueue);
+        rtn = false;
+    }
+    return rtn;
+}
+
+/** @brief Initialize MOTOR CONTROL task and all components that dependency, including
+ * I2C3 for flow sensors communication; PWM_Motor channel for Motor control; SPI3
+ * for DRV8308 Motor Driver communication
+ * This function should be called 1 times at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void MotorTask_Inititalize(void) {
+    //create MOTOR CONTROL queue to communicate with other tasks
+    s_MotorQueue = xQueueCreate(MOTOR_QUEUE_SIZE, sizeof (MOTOR_CTRL_EVENT_t));
+
+    //create MUTEX
+    s_MotorDataMutex = xSemaphoreCreateMutex();
+    xSemaphoreGive(s_MotorDataMutex);
+    
+
+    //initialize SPI3 for DRV8308 Motor driver communication 
+    //DRV8308_Initialize();
+    PWM_Motor_init();
+
+//    //initialize PC monitor module
+//    PC_Monitor_Initialize();
+    
+    //initialize filters
+    KalmanLPF_Initialize(&s_MotorLPF);
+    
+    //initialize Flow controller
+    FlowController_Initialize();
+    
+    //initialize variables
+    s_MotorCtrlState = eMotorIdleState;
+    s_MotorOperMode = eMotorFlowCtrlMode;
+    s_MotorTargetPower = 10;
+    s_MotorTargetSpeed = 0;
+    s_MotorSettingFlow = MOTOR_INIT_FLOWRATE;
+    s_MotorOperatingFlow = MOTOR_INIT_FLOWRATE;
+}
+
+/** @brief Create a Real Time task to do Flow control. 
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return None
+ */
+void MotorTask_Create(void) {
+    xTaskCreate((TaskFunction_t) MotorTask_Func,
+            "Flow Control Task",
+            MOTOR_TASK_STACK, NULL, MOTOR_TASK_PRIORITY, NULL);
+}
+
+/** @brief Get data sharing from Motor Control such as: Air Flow, O2 Flow, 
+ * Current power supply for Motor in percent ...
+ *  @param [in]  None   
+ *  @param [out]  s_MOTOR_PUBLIC_DATA_t* data   external pointer to store data
+ *  @return None
+ *  @retval true    getting data OK
+ *  @retval false   getting data failed
+ */
+bool MotorTask_GetPublicData(MOTOR_PUBLIC_DATA_t* data) {
+        //take resource 
+    if (xSemaphoreTake(s_MotorDataMutex, MOTOR_MUTEX_MAX_WAIT) == pdTRUE) {
+        //copy data
+        *data = s_MotorPublicData;
+        //release semaphore
+        xSemaphoreGive(s_MotorDataMutex);
+        
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+/** @brief Function to run MOTOR CONTROL task. This function need to be call in a loop
+ *  @param [out]    None
+ *  @return None
+ */
+void MotorTask_Run(void){
+    //process input events
+    MotorTask_HandleEvent();
+    //Maintain Flow control task
+    MotorTask_Maintain();
+}
+
+/** @brief Function to maintain MOTOR CONTROL task. This function will be executed
+ * automatically by RTOS after MotorTask_Inititalize() function is called
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return None
+ */
+void MotorTask_Func(void) {
+    //declare time scheduler
+    const TickType_t cycleTime = MOTOR_TASK_PERIODIC_MS;
+
+    //wait for sensor power up
+    vTaskDelay(100);
+    //Initialize Flow sensors
+    AirFlowSensor_Initialize();
+    O2FlowSensor_Initialize();
+
+    //initialize Motor Driver
+//    DRV8308_Configure();
+    //stop motor at first
+//    DRV8308_Stop();
+    //start IC8 for speed measurement
+    IC8_Start();
+    
+    //record execution time
+    s_MotorTaskWakeTime = xTaskGetTickCount();
+    
+    while (1) {
+        //process input events
+        MotorTask_HandleEvent();
+
+        //Maintain Flow control task
+        MotorTask_Maintain();
+        
+        //wait until next turn
+        vTaskDelayUntil(&s_MotorTaskWakeTime, cycleTime);
+    }
+}
+
+/** @brief Handle event sent to MOTOR CONTROL task via MOTOR CONTROl Queue
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return None
+ */
+void MotorTask_HandleEvent(void) {
+    MOTOR_CTRL_EVENT_t event;
+    //check queue and process data
+    while (xQueueReceive(s_MotorQueue, &event, 0) == pdTRUE) 
+    {
+        switch (s_MotorCtrlState) 
+        {
+            E_TreatmentMode mode = (E_TreatmentMode)setting_Get(eTreatmentModeSettingId);
+            case eMotorIdleState:
+            {
+                if(event.id == eMotorStartId) 
+                {                    
+                    if((mode == eAdultMode)||(mode == eChildMode)){
+                        //start motor if current mode is adult or children mode 
+                        if(s_MotorEnabledState == true){
+                          s_MotorCtrlState = eMotorStartState;
+                        }
+                    }
+                    if(mode == eDisinfectionMode)
+                    {
+                        //start heater control if current mode is disinfection mode
+                        //check the current condition of system to chose properly disinfection mode (moist or dry)
+                    }
+                } 
+                else if (event.id == eMotorFlowId)
+                {
+                    float flow = event.fData;
+                    if (flow > 60) //max speed = 60 Hz
+                        flow = 60;
+                    else if (flow < MOTOR_INIT_FLOWRATE) //min speed = 3 hz
+                        flow = MOTOR_INIT_FLOWRATE;
+                    s_MotorSettingFlow = flow;
+                    
+                    
+                    //send Flow rate Setting to Heater task
+                    HEATER_CTRL_EVENT_t eventTemp = {.id = eHeaterFlowRateSettingId, .fData = s_MotorSettingFlow};
+                    HeaterTask_SendEvent(eventTemp);
+                
+                }
+                else if (event.id == eMotorModeId) {
+                    s_MotorOperMode = (E_MotorOperationMode)event.iData;
+                }
+            }
+                break;
+            case eMotorOperateState:
+            {
+                switch(event.id) {
+                    case eMotorStopId:
+                    {
+                        s_MotorCtrlState = eMotorStopState;
+                    }
+                        break;
+                    case eMotorPrepareStopId:
+                    {
+                        s_MotorCtrlState = eMotorPreStopState;
+                    }
+                        break;
+                    case eMotorPowerId:
+                    {
+                        float power = event.fData;///5.0;//test
+                        if (power > 100)
+                            power = 100;
+                        else if (power < 0) 
+                            power = 0;
+                        s_MotorTargetPower = power;
+                    }
+                        break;
+                    case eMotorSpeedId:
+                    {
+                        float speed = event.fData;
+                        if (speed > 500)    //max speed = 500 Hz
+                            speed = 500;
+                        else if (speed < 50) //min speed = 50 hz
+                            speed = 50;
+                        s_MotorTargetSpeed = speed;
+                    }
+                        break;
+                    case eMotorFlowId:
+                    {
+                        float flow = event.fData;
+                        if (flow > 60) //max speed = 60 Hz
+                            flow = 60;
+                        else if (flow < MOTOR_INIT_FLOWRATE) //min speed = 3 hz
+                            flow = MOTOR_INIT_FLOWRATE;
+                        s_MotorSettingFlow = flow;
+                        
+                        //send Flow rate Setting to Heater task
+                        HEATER_CTRL_EVENT_t eventTemp = {.id = eHeaterFlowRateSettingId, .fData = s_MotorSettingFlow};
+                        HeaterTask_SendEvent(eventTemp);
+                    }
+                        break;
+                    default:
+                        break;
+                }
+            }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+/** @brief Maintain MOTOR CONTROL task, including read flow sensors, handle data,
+ * drive Blower, ...
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return None
+ */
+void MotorTask_Maintain(void) {
+    switch (s_MotorCtrlState) {
+        case eMotorIdleState:
+        {
+            //do something on IDLE state
+            
+            float airFlow, o2Flow;
+            bool airResult = AirFlowSensor_GetFlow(&airFlow);
+            bool o2Result = O2FlowSensor_GetFlow(&o2Flow);
+            if ((airResult == false) || (o2Result == false)) {
+                //error detected, do nothing, return here
+                return;
+            }
+            
+            if (xSemaphoreTake(s_MotorDataMutex, MOTOR_MUTEX_MAX_WAIT) == pdTRUE) {
+                s_MotorPublicData.airFlow = airFlow;
+                s_MotorPublicData.o2Flow = o2Flow;  //not implemented yet
+                s_MotorPublicData.measureTotalFlow = airFlow + o2Flow;  //not implemented yet
+                //release semaphore
+                xSemaphoreGive(s_MotorDataMutex);
+            }
+                
+        }
+            break;   
+        case eMotorStartState: 
+        {
+            //try to start motor
+            if (MotorTask_Start() == false) {
+                //change state to ERROR
+                s_MotorCtrlState = eMotorErrorState;
+                s_MotorError = eDeviceErrorDetected;
+                SYS_PRINT("s_MotorError = eDeviceErrorDetected\n");
+            }
+            else {
+                //go to prepare operate state
+                s_MotorCtrlState = eMotorPreOperateState;
+            }
+            //update time tick
+            s_MotorTaskWakeTime = xTaskGetTickCount();
+        }
+            break;
+        case eMotorPreOperateState:
+        {
+            MotorTask_PreOperate();
+            
+            //send event to start Heater Task. The Heater task should be synchronize with
+            //motor task and just operate when Motor spinning.
+            HEATER_CTRL_EVENT_t event = {.id = eHeaterStartId, .iData = 0};
+            HeaterTask_SendEvent(event);
+            //HeaterTask_SetState(eHeaterStartState);
+            
+            //go to operate state
+            s_MotorCtrlState = eMotorOperateState;
+        }
+            break;
+        case eMotorOperateState:
+        {
+            //Ramp flow slowly to Flow setting
+            MotorTask_RampUp();
+            //do motor operation
+            if(MotorTask_Operate() == false) {
+                //an error detected, change state to HandleError
+                s_MotorCtrlState = eMotorErrorState;
+            }
+        }
+            break;
+            
+        case eMotorPreStopState:
+        {
+            //do motor operation
+            if(MotorTask_Operate() == false) {
+                //an error detected, change state to HandleError
+                s_MotorCtrlState = eMotorErrorState;
+                
+            }
+            //if(tempChamberOutTemp < 30.0)
+            //{
+            //    s_MotorCtrlState = eMotorStopState;
+            //}
+        }
+            break;
+        case eMotorStopState:
+        {
+            if(MotorTask_Stop() == false) {
+                //change state to ERROR
+                s_MotorCtrlState = eMotorErrorState;
+            }
+            else {
+                //go to IDLE state
+                s_MotorCtrlState = eMotorIdleState;
+            }
+            
+            //disable Flow controller
+            FlowController_Enable(false);
+            
+            //send event to Stop Heater Task. The Heater task should be synchronize with
+            //motor task and just operate when Motor spinning.
+            HEATER_CTRL_EVENT_t event = {.id = eHeaterStopId, .iData = 0};
+            HeaterTask_SendEvent(event);
+            //HeaterTask_SetState(eHeaterStopState);
+            
+            //update time tick
+            s_MotorTaskWakeTime = xTaskGetTickCount();
+        }
+            break;
+
+        case eMotorErrorState:
+        {
+            //send event to Alarm task
+            //alarmInterface_SendEvent(eMotorTaskErrorAlarm, eActive, eHighPriority);
+            //send event to Stop Heater Task. The Heater task should be synchronize with
+            //motor task and just operate when Motor spinning.
+            HEATER_CTRL_EVENT_t event = {.id = eHeaterStopId, .iData = 0};
+            HeaterTask_SendEvent(event);
+            //HeaterTask_SetState(eHeaterStopState);
+            
+            MotorTask_Stop();
+                    
+            //change state to IDLE
+            s_MotorCtrlState = eMotorIdleState;
+        }
+            break;
+        default:
+            s_MotorCtrlState = eMotorIdleState;
+            break;
+    }
+}
+
+/** @brief Handle motor start. This function will called when state 
+ * eMotorStartState has been activated. In this function, ENABLE pin will turned
+ * HIGH, BRAKE pin turned LOW and wait for motor spinning in 1 seconds. If over 1s 
+ * but Motor can not spin, ENABLE pin should be turn LOW in 50ms (or TBD) and try gain. 
+ * Re-start will do continously 3 times. If over the time but can not started, 
+ * it will return to FALSE. Otherwise, this function will return true
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ *  @retval true    Motor started OK
+ *  @retval false   Motor started failed even tried 3 times
+ */
+bool MotorTask_Start() {
+    //wait for motor spinning
+    uint16_t iWait, iTry;
+    for (iTry = 0; iTry < 2; iTry++) {
+        //start motor
+        //DRV8308_Start();
+        PWM_Motor_start();
+        //wait for motor spin
+        for (iWait = 0; iWait < 50; iWait++) { //100 times of 10ms = 1s
+            //float speed = DRV8308_MonitorSpeed();
+            float speed = PWM_Motor_MonitorSpeed();
+            
+            //check for speed + LOCK signal
+//            if ((speed > 0) /*&& (MOTOR_IS_LOCKED == true)*/) 
+            {
+                //SYS_PRINT("\n MOTOR STARTED **************");
+                return true;
+            }
+
+            //check error
+            /*if (MOTOR_IS_FAULT == true) {
+                SYS_PRINT("\n MOTOR ERROR &&&&&&&&&");
+                return false;
+            }*/
+            //delay 10ms
+            vTaskDelay(10);
+        }
+        //stop motor, wait for 100ms
+        //DRV8308_Stop();
+        PWM_Motor_stop();
+        //vTaskDelay(1000);
+    }
+    
+    //SYS_PRINT("\n Motor Start failed**************");
+    return false;
+}
+
+/** @brief Handle motor stop. This function will called when state 
+ * eMotorStopState has been activated. In this function, ENABLE pin will turned
+ * LOW, BRAKE pin turned HIGH and wait for motor stop spinning in maximum 2 seconds. 
+ * If over 2s but Motor can not stop, this function will return to FALSE indicate
+ * that has some error occurred. Otherwise, this function will return true
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ *  @retval true    Motor stop OK
+ *  @retval false   Motor can not stop even waiting for 2 seconds
+ */
+bool MotorTask_Stop() {
+    uint16_t iWait;
+    //stop motor
+    //DRV8308_Stop();
+    PWM_Motor_stop();
+    //wait for stop 
+    for (iWait = 0; iWait < 200; iWait++) { //200 times of 10ms = 2s
+        
+        //float speed = DRV8308_MonitorSpeed();
+        float speed = PWM_Motor_MonitorSpeed();
+        //check speed + LOCK signal
+//        if (/*(speed == 0) &&*/ (MOTOR_IS_LOCKED == false))
+        {
+//            SYS_PRINT("\n MOTOR STOPPED **************");
+            return true;
+        }
+
+        //check error
+        /*if (MOTOR_IS_FAULT == true) {
+            SYS_PRINT("\n MOTOR ERROR &&&&&&&&&");
+            return false;
+        }*/
+        
+        //delay 10ms
+        vTaskDelay(10);
+    }
+    
+    //if over time can not stop, return false
+    return false;
+}
+
+/** @brief This function do some set up before enter operation mode. Depend on 
+ * which operation mode, the setting up shall be different
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return None
+ */
+void MotorTask_PreOperate() {
+    switch (s_MotorOperMode) {
+        case eMotorPowerCtrlMode:
+        {
+        
+        }
+            break;
+        case eMotorSpeedCtrlMode:
+        {
+        
+        }
+            break;
+        case eMotorFlowCtrlMode:
+        {
+            s_MotorOperatingFlow = MOTOR_INIT_FLOWRATE;
+            FlowController_Enable(true);
+        }
+            break;
+        default:
+            break;
+    }
+}
+
+/** @brief Function perform Motor Task operation. It shall contain a controller
+ * inside. Depend on operation mode, it may perform corresponding controller
+ * This function also monitor speed from Blower as well as detect error from Motor
+ * Driver
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return None
+ */
+bool MotorTask_Operate() {
+    //read Air flow sensor data
+    float airFlow, o2Flow, totalFlow;
+    bool airResult = AirFlowSensor_GetFlow(&airFlow);
+    bool o2Result = O2FlowSensor_GetFlow(&o2Flow);
+
+    if ((airResult == false) || (o2Result == false)) {
+        //error detected, do nothing, return here
+        return false;
+    }
+
+    //get total flow
+    totalFlow = airFlow + o2Flow;
+    //bypass filter
+    double zData[Mobs] = {totalFlow, airFlow, o2Flow};
+    KalmanLPF_Step(&s_MotorLPF, zData);
+
+    //update local variables 
+    s_TotalFlow = KalmanLPF_GetX(&s_MotorLPF, 0);
+    s_AirFlow = KalmanLPF_GetX(&s_MotorLPF, 1);
+    s_O2Flow = KalmanLPF_GetX(&s_MotorLPF, 2);
+    
+    
+    switch (s_MotorOperMode) {
+        case eMotorPowerCtrlMode:
+        {
+            //DRV8308_SetPower(s_MotorTargetPower);
+            PWM_Motor_setDutyCycle(100.0-s_MotorTargetPower);
+        }
+            break;
+        case eMotorSpeedCtrlMode:
+        {
+        
+        }
+            break;
+        case eMotorFlowCtrlMode:
+        {
+            //do flow controller
+            s_MotorOutput = FlowController_Operate(s_TotalFlow, s_MotorOperatingFlow);
+
+            //update data on PC monitor
+//            PC_Monitor_Send(s_AirFlow, s_O2Flow, s_TotalFlow, s_MotorOutput);
+            
+//            //calculate o2 concentration
+//            float o2Concentration = 0;//(0.21*s_AirFlow + s_O2Flow) / (s_AirFlow + s_O2Flow);
+//            guiInterface_SendEvent(eGuiO2MonitorId, (uint32_t)(o2Concentration*1000.0));           
+//            guiInterface_SendEvent(eGuiFlowMonitorId, (uint32_t)((s_AirFlow + s_O2Flow)*10.0));
+        }
+            break;
+        default:
+            break;
+    }
+
+    //monitor motor speed
+    //float currentSpeed = DRV8308_MonitorSpeed();
+    float currentSpeed = PWM_Motor_MonitorSpeed();
+    
+        //update public data
+    if (xSemaphoreTake(s_MotorDataMutex, MOTOR_MUTEX_MAX_WAIT) == pdTRUE) {
+        s_MotorPublicData.airFlow = s_AirFlow;
+        s_MotorPublicData.o2Flow = s_O2Flow;  //not implemented yet
+        s_MotorPublicData.speed = currentSpeed;
+        s_MotorPublicData.powerOut = s_MotorOutput;
+        s_MotorPublicData.settingFlow = s_MotorOperatingFlow;
+        s_MotorPublicData.measureTotalFlow = s_TotalFlow;
+        //release semaphore
+        xSemaphoreGive(s_MotorDataMutex);
+    }
+    
+//    //check error pin from DRV8308
+//    if (MOTOR_IS_FAULT == true) {
+////      SYS_PRINT("\n MOTOR ERROR &&&&&&&&&");
+//        s_MotorError = eDeviceErrorDetected;
+//        SYS_PRINT("s_MotorError = eDeviceErrorDetected\n");
+//        return false;
+//    }
+    
+//    if(DRV8308_CheckMotorError() == false)
+//    {
+//        s_MotorError = eDeviceErrorDetected;
+//        SYS_PRINT("DRV8308_CheckMotorError() = err\n");
+//        return false;
+//    }
+    return true;
+}
+
+void MotorTask_RampUp() {
+#define RAMP_UP_FLOW_STEP    (0.2)   //0.1 LPM
+#define RAMP_UP_TIME_STEP    (50)   //100 MS
+    static TickType_t lastTimeTick = 0;
+    //check condition to see need to ramp up or not
+    if (s_MotorOperatingFlow >= s_MotorSettingFlow)
+    {
+        s_MotorOperatingFlow = s_MotorSettingFlow;
+        return;
+    }
+    
+    TickType_t currentTimeTick = xTaskGetTickCount();
+    if ((currentTimeTick - lastTimeTick) >= RAMP_UP_TIME_STEP) {
+        //SYS_PRINT("\n MOTOR_RAMP: %.2f", s_MotorOperatingFlow);
+        s_MotorOperatingFlow += RAMP_UP_FLOW_STEP;
+        lastTimeTick = currentTimeTick;
+    }
+    
+}
+
+
+/** @brief Function return current flow rate target setting
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @return float
+ */
+float MotorTask_GetCurrentFlowSetting() {
+    return s_MotorSettingFlow;
+}
+/* *****************************************************************************
+ End of File
+ */
+
+
+/** @brief Query any error happen with Motor 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return None
+ *  @retval true Motor has error
+ *  @retval false Motor is OK
+ */
+bool MotorTask_IsMotorFailed() 
+{
+    if (s_MotorError == eDeviceNoError) {
+        return false;       //Motor OK
+    }
+    else {
+        return true;        //Motor ERROR
+    }
+}
+
+
+/** @brief Enable Motor, allow motor run 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return None
+*/ 
+bool MotorTask_EnableMotor() 
+{
+    s_MotorEnabledState = true;
+}
+
+
+/** @brief Disable Motor, do not allow motor run 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return None
+*/  
+bool MotorTask_DisableMotor() 
+{
+    s_MotorEnabledState = false;
+}
+
+/** @brief Query motor operating status
+*  @param [in]  None   
+*  @param [out] None
+*  @return None
+*  @retval true Motor is operating
+*  @retval false Motor is stopped
+*/
+bool MotorTask_IsOperating()
+{
+    if(s_MotorCtrlState == eMotorOperateState){
+        return true;
+    }
+    else{
+        return false;
+    }
+}

@@ -1,0 +1,242 @@
+/** @file SettingScreen_BrightnessSetting.h
+ *  @brief The interfaces for display brightness setting
+ *  @author Trac Truong
+ */
+
+#ifndef SETTINGSCREEN_BRIGHTNESSSETTING_H
+#define	SETTINGSCREEN_BRIGHTNESSSETTING_H
+
+/* This section lists the other files that are included in this file.
+ */
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#ifdef UNIT_TEST
+    #define SYS_PRINT(...)
+    typedef enum laResult_t
+    {
+        LA_FAILURE = -1,
+        LA_SUCCESS = 0
+    } laResult;
+    typedef enum laBool_t
+    {
+        LA_FALSE = 0,
+        LA_TRUE
+    } laBool;
+    typedef int laWidget;
+
+    typedef enum laEventID_t
+    {
+        // internal events
+        LA_EVENT_NONE,
+        LA_EVENT_SCREEN_CHANGE,
+        LA_EVENT_TOUCH_DOWN,
+        LA_EVENT_TOUCH_UP,
+        LA_EVENT_TOUCH_MOVED
+    } laEventID;
+    typedef struct laWidgetEvent_t
+    {
+        laEventID id;
+        laWidget* source;
+        laWidget* target;
+        laBool accepted;
+    } laWidgetEvent;
+
+    typedef struct laInput_TouchDownEvent_t
+    {
+        laWidgetEvent event;
+
+        int32_t touchID;
+        int32_t x;
+        int32_t y;
+    } laInput_TouchDownEvent;
+
+    typedef uint32_t GFXU_CHAR;
+    typedef uint32_t GFXU_FontAsset;
+
+    typedef struct laString_t
+    {
+        GFXU_CHAR*   data; // local string data storage
+        uint32_t    capacity; // actual memory capacity of the string
+        uint32_t    length; // actual length of the string, typically this is
+                            // capacity - 1, but can be less.
+
+        GFXU_FontAsset*  font;  // the font that contains the glyph raster data
+                                // for this string
+
+        int32_t     table_index; // if this is not LA_STRING_NULLIDX then this string
+                                 // is referencing an index in the string table.  string
+                                 // table references are read-only but can be extracted
+                                 // to local modifiable versions
+    } laString;
+
+    typedef enum
+    {
+        LA_HALIGN_LEFT,
+        LA_HALIGN_CENTER,
+        LA_HALIGN_RIGHT
+    } laHAlignment;
+
+    typedef enum
+    {
+        LA_VALIGN_TOP,
+        LA_VALIGN_MIDDLE,
+        LA_VALIGN_BOTTOM
+    } laVAlignment;
+    typedef uint32_t GFXU_ExternalAssetReader;
+
+    typedef struct laLabelWidget_t
+    {
+        laWidget widget; // widget base class
+
+        laString text; // string to draw
+
+        laHAlignment halign; // horizontal alignment of string
+        laVAlignment valign; // vertical alignment of string
+
+        GFXU_ExternalAssetReader* reader; // asset reader
+    } laLabelWidget;
+
+    typedef void (*laWidget_TouchDownEvent_FnPtr)(laWidget*, laInput_TouchDownEvent*);
+    typedef uintptr_t       SYS_FS_HANDLE;
+    #define SYS_FS_HANDLE_INVALID ((SYS_FS_HANDLE)(-1))
+    typedef enum
+    {
+        /* Set file offset to input number of bytes from the start of file */
+        SYS_FS_SEEK_SET,
+        /* Set file offset to its current location plus input number of bytes */
+        SYS_FS_SEEK_CUR,
+        /* Set file offset to size of the file plus input number of bytes */
+        SYS_FS_SEEK_END,
+
+    } SYS_FS_FILE_SEEK_CONTROL;
+
+    void laWidget_SetX(laWidget* w, int32_t x);
+    void laWidget_SetY(laWidget* w, int32_t y);
+    laResult laWidget_SetVisible(laWidget* wgt, laBool visible);
+    laResult laWidget_OverrideTouchDownEvent(laWidget* wgt, laWidget_TouchDownEvent_FnPtr ptr);
+    laString laString_CreateFromCharBuffer(const GFXU_CHAR* chr, GFXU_FontAsset* fnt);
+    laResult laLabelWidget_SetText(laLabelWidget* lbl, laString str);
+    void laString_Destroy(laString* str);
+
+    void SettingScreen_SetSettingScreenUpdate(bool f);
+
+    extern laWidget* SC_MenuSetting_SettingBrightness_PrevButton;
+    extern laWidget* SC_MenuSetting_SettingBrightness_NextButton;
+    extern laLabelWidget* SC_MenuSetting_SettingBrightness_ValueLabel;
+    extern laWidget* SC_MenuSetting_SettingBrightness_UnderBar;
+    extern GFXU_FontAsset BebasNeueBook_S60_Bold_Internal;
+    extern laLabelWidget* SC_MenuSetting_SettingBrightness_OffLabel;
+    extern laLabelWidget* SC_MenuSetting_SettingBrightness_OnLabel;
+
+#endif
+
+#include "Gui/Setting.h"
+#include "Gui/LogInterface.h"
+
+#define UNDERBAR_ON_POSITION_Y 120
+#define UNDERBAR_OFF_POSITION_Y 157
+
+/** @brief SettingScreen_OxySourceSetting_Init
+ *      This init data when open the setting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_Init();
+
+/** @brief SettingScreen_BrightnessSetting_Display
+ *      This control for display wifi setting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_Display();
+
+/** @brief SettingScreen_BrightnessSetting_SetCallbackFunction
+ *      This set callback function for some event that not auto generated by Harmony
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_SetCallbackFunction(void);
+
+/** @brief SettingScreen_BrightnessSetting_NextSetting
+ *      This function is switch next language setting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_Inc();
+
+/** @brief SettingScreen_BrightnessSetting_PrevSetting
+ *      This function is switch previous language setting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_Dec();
+
+/** @brief SettingScreen_BrightnessSetting_SetLevelSetting
+ *      This function is use to set brightness level setting
+ *  @param [in] int s
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_SetLevelSetting(int s);
+
+/** @brief SettingScreen_BrightnessSetting_GetLevelSetting
+ *      This function is use to get level setting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return int
+ */
+int SettingScreen_BrightnessSetting_GetLevelSetting();
+
+/** @brief SettingScreen_BrightnessSetting_SetSetting
+ *      This function is use to set setting
+ *  @param [in] E_BrightnessMode s
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_SetModeSetting(E_BrightnessMode s);
+
+/** @brief SettingScreen_BrightnessSetting_GetSetting
+ *      This function is use to get setting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return E_BrightnessMode
+ */
+E_BrightnessMode SettingScreen_BrightnessSetting_GetModeSetting();
+
+/** @brief SettingScreen_BrightnessSetting_CheckDataChange
+ *      This check if this setting is changed
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+bool SettingScreen_BrightnessSetting_CheckDataChange();
+
+/** @brief SettingScreen_BrightnessSetting_SaveSetting
+ *      This save the setting if the setting change
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_BrightnessSetting_SaveSetting();
+
+/** @brief SettingScreen_BrightnessSetting_DiscardSetting
+ *      This discard the setting change
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+
+void SettingScreen_BrightnessSetting_DiscardSetting();
+
+#endif
+
+/* end of file */

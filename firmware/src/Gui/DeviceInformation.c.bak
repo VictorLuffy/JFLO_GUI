@@ -1,0 +1,517 @@
+/** @file DeviceInformation.h
+ *  @brief 
+ *  @author Trac Truong
+ */
+
+#include <string.h>
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "system/debug/sys_debug.h"
+
+#include "../FreeRTOSConfig.h"
+#include "FreeRTOS.h"
+#include "../third_party/rtos/FreeRTOS/Source/include/semphr.h"
+
+#include "stdio.h"
+
+#include "File.h"
+#include "DeviceInformation.h"
+#include "LogMgr.c"
+
+extern SYS_FS_HANDLE g_devInfoFile;
+
+static DeviceInformation s_deviceInfo;
+
+static SemaphoreHandle_t s_deviceInfoMutex = NULL;
+
+void DeviceInformation_Init(void)
+{
+    if (s_deviceInfoMutex == NULL)
+    {
+        s_deviceInfoMutex = xSemaphoreCreateMutex();
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    
+    if (s_deviceInfoMutex == NULL)
+    {
+        SYS_PRINT("s_deviceInfoMutex is NULL \n");
+        return;
+    }
+
+    if (!DeviceInformation_Restore())
+    {
+        SYS_PRINT("\n Set device infomation default value - %d bytes \n",sizeof(DeviceInformation));
+        DeviceInformation_SetDefault();
+        DeviceInformation_Save();
+    }
+}
+    
+void DeviceInformation_GetAllInfo(DeviceInformation *devInfo)
+{
+    if (devInfo == NULL)
+    {
+        return;
+    }
+    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+    {
+        memcpy(devInfo, &s_deviceInfo, sizeof(DeviceInformation));
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    else
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+    }
+}
+
+void DeviceInformation_SetAllInfo(DeviceInformation devInfo)
+{
+    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+    {
+        memcpy(&s_deviceInfo, &devInfo, sizeof(DeviceInformation));
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    else
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+    }
+}
+
+void DeviceInformation_AddOperationTimeAdult(uint32_t op_time)
+{
+    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+    {
+        s_deviceInfo.total_operation_time_adult += op_time;
+        s_deviceInfo.operation_time_after_service_adult += op_time;
+
+        if (s_deviceInfo.total_operation_time_adult + s_deviceInfo.total_operation_time_child > MAX_OPERATION_TIME)
+        {
+            s_deviceInfo.total_operation_time_adult = s_deviceInfo.total_operation_time_adult + s_deviceInfo.total_operation_time_child - MAX_OPERATION_TIME;
+            s_deviceInfo.total_operation_time_child = 0;
+        }
+        if (s_deviceInfo.operation_time_after_service_adult + s_deviceInfo.operation_time_after_service_child > MAX_OPERATION_TIME)
+        {
+            s_deviceInfo.operation_time_after_service_adult = s_deviceInfo.operation_time_after_service_adult + s_deviceInfo.operation_time_after_service_child - MAX_OPERATION_TIME;
+            s_deviceInfo.operation_time_after_service_child = 0;
+        }
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    else
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+    }
+}
+
+void DeviceInformation_AddOperationTimeChild(uint32_t op_time)
+{
+    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+    {
+        s_deviceInfo.total_operation_time_child += op_time;
+        s_deviceInfo.operation_time_after_service_child += op_time;
+
+        if (s_deviceInfo.total_operation_time_adult + s_deviceInfo.total_operation_time_child > MAX_OPERATION_TIME)
+        {
+            s_deviceInfo.total_operation_time_adult = 0;
+            s_deviceInfo.total_operation_time_child = s_deviceInfo.total_operation_time_adult + s_deviceInfo.total_operation_time_child - MAX_OPERATION_TIME;
+        }
+        if (s_deviceInfo.operation_time_after_service_adult + s_deviceInfo.operation_time_after_service_child > MAX_OPERATION_TIME)
+        {
+            s_deviceInfo.operation_time_after_service_adult = 0;
+            s_deviceInfo.operation_time_after_service_child = s_deviceInfo.operation_time_after_service_adult + s_deviceInfo.operation_time_after_service_child - MAX_OPERATION_TIME;
+        }
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    else
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+    }    
+}
+
+uint32_t DeviceInformation_GetTotalOperationTime(void)
+{
+    uint32_t ret = 0;
+    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+    {
+        ret = s_deviceInfo.total_operation_time_adult + s_deviceInfo.total_operation_time_child;
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    else
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+    }   
+    return ret;
+}
+
+uint32_t DeviceInformation_GetOperationTimeAfterService(void)
+{
+    uint32_t ret = 0;
+    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+    {
+        ret = s_deviceInfo.operation_time_after_service_adult + s_deviceInfo.operation_time_after_service_child;
+        xSemaphoreGive( s_deviceInfoMutex );
+    }
+    else
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+    }   
+    return ret;
+}
+
+//void DeviceInformation_GetESPFWVersion(char *str)
+//{
+//    if (str == NULL)
+//    {
+//        return;
+//    }
+//    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+//    {
+//        sprintf(str,"%s", s_deviceInfo.esp_fw_version);
+//        xSemaphoreGive( s_deviceInfoMutex );
+//    }
+//    else
+//    {
+//        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+//    }   
+//    return;
+//}
+//
+//void DeviceInformation_SetESPFWVersion(const char *str)
+//{
+//    if (str == NULL)
+//    {
+//        return;
+//    }
+//    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+//    {
+//        sprintf(s_deviceInfo.esp_fw_version,"%s", str);
+//        xSemaphoreGive( s_deviceInfoMutex );
+//    }
+//    else
+//    {
+//        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+//    }   
+//    return;
+//}
+//
+//void DeviceInformation_GetSpO2FWVersion(char *str)
+//{
+//    if (str == NULL)
+//    {
+//        return;
+//    }
+//    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+//    {
+//        sprintf(str,"%s", s_deviceInfo.spo2_fw_version);
+//        xSemaphoreGive( s_deviceInfoMutex );
+//    }
+//    else
+//    {
+//        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+//    }   
+//    return;
+//}
+//
+//void DeviceInformation_SetSpO2FWVersion(const char *str)
+//{
+//    if (str == NULL)
+//    {
+//        return;
+//    }
+//    if(s_deviceInfoMutex != NULL && xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) == pdTRUE )
+//    {
+//        sprintf(s_deviceInfo.spo2_fw_version,"%s", str);
+//        xSemaphoreGive( s_deviceInfoMutex );
+//    }
+//    else
+//    {
+//        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+//    }   
+//    return;
+//}
+//
+
+void DeviceInformation_Save(void )
+{
+    SYS_PRINT("DeviceInformation_Save \n");
+    DeviceInformation devInfo;
+    DeviceInformation_GetAllInfo(&devInfo);
+    unsigned short temp = crc_CheckNoInit(sizeof(DeviceInformation), (uint8_t*)&devInfo);
+    SYS_PRINT("DeviceInformation_Save crc %d \n", temp);
+    file_Seek(g_devInfoFile, 0, SYS_FS_SEEK_SET);
+    file_Write((void*)&devInfo, sizeof(DeviceInformation), g_devInfoFile);
+    file_Write((void*)&temp, sizeof(temp), g_devInfoFile);
+    
+    DeviceInformation_PrintToConsole();
+    return;
+}
+
+bool DeviceInformation_Restore(void )
+{
+    SYS_PRINT("DeviceInformation_Restore \n");
+    bool ret = false;   
+    uint8_t data[sizeof(DeviceInformation) + CRC_SIZE_BYTES];
+
+    //Read data from SQI flash
+    file_Read(data, sizeof(DeviceInformation) + CRC_SIZE_BYTES , g_devInfoFile);
+
+    //check crc for the data has been read
+    unsigned short temp = crc_CheckNoInit(sizeof(DeviceInformation) + CRC_SIZE_BYTES, data);
+
+    if (temp == 0) //crc good
+    {
+        DeviceInformation devInfo;
+        memcpy(&devInfo, data, sizeof(DeviceInformation));
+        DeviceInformation_SetAllInfo(devInfo);
+        ret = true;
+        DeviceInformation_PrintToConsole();       
+        if (strcmp(s_deviceInfo.mainSWVer, MAIN_FW_VERSION) != 0)
+        {
+            SYS_PRINT("\nMain firmware");
+//            SYS_PRINT("Main firmware: %s", s_deviceInfo.mainSWVer);
+            char buff[255];
+            sprintf(buff, "mainSWVer changed %s -> %s \n",s_deviceInfo.mainSWVer, MAIN_FW_VERSION);
+            LogInterface_WriteDebugLogFile(buff);
+            SYS_PRINT(buff);
+            DeviceInformation_SetDeviceInfo(eMainSWVersionDeviceInfoId, MAIN_FW_VERSION);
+        }
+    }
+    else
+    {
+        char buff[255];
+        sprintf(buff, "DeviceInformation_Restore crc failure %d \n", temp);
+        SYS_PRINT(buff);
+        LogInterface_WriteDebugLogFile(buff);
+    }
+    return ret;
+}
+
+void DeviceInformation_SetDefault(void )
+{
+    DeviceInformation devInfo = {
+        .total_operation_time_adult = 0,
+        .total_operation_time_child = 0,
+        .operation_time_after_service_adult = 0,
+        .operation_time_after_service_child = 0,
+    };
+    strcpy(devInfo.mainSerialNo, "JFL2104000001");
+    strcpy(devInfo.mainTotalRuntime, "00");
+    strcpy(devInfo.mainSWVer, "1.0.0");
+    strcpy(devInfo.mainBootloaderVer, "1.0.0");
+    strcpy(devInfo.subSWVer, "1.0.0");
+    strcpy(devInfo.subBootloaderVer, "1.0.0");
+    strcpy(devInfo.chamberSerialNo, "JFH2104000001");
+    strcpy(devInfo.chamberTotalRuntime, "00");
+    strcpy(devInfo.chamberSWVer, "1.0.0");
+    strcpy(devInfo.chamberBootloaderVer, "1.0.0");
+    strcpy(devInfo.cradleSerialNo, "JFC2104000001");
+    strcpy(devInfo.cradleTotalRuntime, "00");
+    strcpy(devInfo.cradleSWVer, "1.0.0");
+    strcpy(devInfo.cradleBootloaderVer, "1.0.0");
+    strcpy(devInfo.circuitSerialNo, "JFC2104000001");
+    strcpy(devInfo.circuitType, "Adult");
+    strcpy(devInfo.circuitStartOfUse, "2022/04/21");
+    strcpy(devInfo.circuitUsageTime, "00");
+    strcpy(devInfo.circuitFactory, "Metran Japan");
+    
+    DeviceInformation_SetAllInfo(devInfo);
+    DeviceInformation_PrintToConsole();
+}
+// Debugging only
+void DeviceInformation_PrintToConsole(void )
+{
+    SYS_PRINT("total_operation_time_adult %d \n",s_deviceInfo.total_operation_time_adult);
+    SYS_PRINT("total_operation_time_child %d \n",s_deviceInfo.total_operation_time_child);
+    SYS_PRINT("operation_time_after_service_adult %d \n",s_deviceInfo.operation_time_after_service_adult);
+    SYS_PRINT("operation_time_after_service_child %d \n",s_deviceInfo.operation_time_after_service_child);
+
+    SYS_PRINT("%s \n", s_deviceInfo.mainSerialNo);
+    SYS_PRINT("%s \n", s_deviceInfo.mainTotalRuntime);
+    SYS_PRINT("%s \n", s_deviceInfo.mainSWVer);
+    SYS_PRINT("%s \n", s_deviceInfo.mainBootloaderVer);
+    SYS_PRINT("%s \n", s_deviceInfo.subSWVer);
+    SYS_PRINT("%s \n", s_deviceInfo.subBootloaderVer);
+    SYS_PRINT("%s \n", s_deviceInfo.chamberSerialNo);
+    SYS_PRINT("%s \n", s_deviceInfo.chamberTotalRuntime);
+    SYS_PRINT("%s \n", s_deviceInfo.chamberSWVer);
+    SYS_PRINT("%s \n", s_deviceInfo.chamberBootloaderVer);
+    SYS_PRINT("%s \n", s_deviceInfo.cradleSerialNo);
+    SYS_PRINT("%s \n", s_deviceInfo.cradleTotalRuntime);
+    SYS_PRINT("%s \n", s_deviceInfo.cradleSWVer);
+    SYS_PRINT("%s \n", s_deviceInfo.cradleBootloaderVer);
+    SYS_PRINT("%s \n", s_deviceInfo.circuitSerialNo);
+    SYS_PRINT("%s \n", s_deviceInfo.circuitType);
+    SYS_PRINT("%s \n", s_deviceInfo.circuitStartOfUse);
+    SYS_PRINT("%s \n", s_deviceInfo.circuitUsageTime);
+    SYS_PRINT("%s \n", s_deviceInfo.circuitFactory);
+}
+
+void DeviceInformation_GetDeviceInfo(E_DeviceInfoId id, char *str)
+{
+    if (str == 0)
+        return;
+    
+    if(s_deviceInfoMutex == NULL)
+    {
+        SYS_PRINT("Error: deviceInfoMutex is null \n");
+        return;
+    }
+        
+    if (xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) != pdTRUE)
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+        return;
+    }
+    
+    switch(id)
+    {
+        case eMainSerialNoDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.mainSerialNo);
+            break;
+        case eMainTotalRuntimeDeviceInfoId:
+            sprintf(s_deviceInfo.mainTotalRuntime, "%d", (s_deviceInfo.total_operation_time_adult + s_deviceInfo.total_operation_time_child)/60);
+            sprintf(str, "%s", s_deviceInfo.mainTotalRuntime);
+            break;
+        case eMainSWVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.mainSWVer);
+            break;
+        case eMainBootloaderVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.mainBootloaderVer);
+            break;
+        case eSubSWVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.subSWVer);
+            break;
+        case eSubBootloaderVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.subBootloaderVer);
+            break;
+
+        case eChamberSerialNoDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.chamberSerialNo);
+            break;
+        case eChamberTotalRuntimeDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.chamberTotalRuntime);
+            break;
+        case eChamberSWVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.chamberSWVer);
+            break;
+        case eChamberBootloaderVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.chamberBootloaderVer);
+            break;
+
+        case eCradleSerialNoDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.cradleSerialNo);
+            break;
+        case eCradleTotalRuntimeDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.cradleTotalRuntime);
+            break;
+        case eCradleSWVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.cradleSWVer);
+            break;
+        case eCradleBootloaderVersionDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.cradleBootloaderVer);
+            break;
+
+        case eCircuitSerialNoDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.circuitSerialNo);
+            break;
+        case eCircuitTypeDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.circuitType);
+            break;
+        case eCircuitStartOfUseNoDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.circuitStartOfUse);
+            break;
+        case eCircuitUsageTimeDeviceInfoId:
+            sprintf(str, "%s", s_deviceInfo.circuitUsageTime);
+            break;
+        case eCircuitFactoryDeviceInfoId:
+           sprintf(str, "%s", s_deviceInfo.circuitFactory);
+          break;
+        default:
+            break;
+    }
+    xSemaphoreGive( s_deviceInfoMutex );
+}
+void DeviceInformation_SetDeviceInfo(E_DeviceInfoId id, char *str)
+{
+    if (str == 0)
+        return;
+    
+    if(s_deviceInfoMutex == NULL)
+    {
+        SYS_PRINT("Error: deviceInfoMutex is null \n");
+        return;
+    }
+        
+    if (xSemaphoreTake( s_deviceInfoMutex, ( TickType_t ) 20 ) != pdTRUE)
+    {
+        SYS_PRINT("Error: Failed to take deviceInfoMutex \n");
+        return;
+    }
+    
+    switch(id)
+    {
+        case eMainSerialNoDeviceInfoId:
+            strcpy(s_deviceInfo.mainSerialNo, str);
+            break;
+        case eMainTotalRuntimeDeviceInfoId:
+            strcpy(s_deviceInfo.mainTotalRuntime, str);
+            break;
+        case eMainSWVersionDeviceInfoId:
+            strcpy(s_deviceInfo.mainSWVer, str);
+            break;
+        case eMainBootloaderVersionDeviceInfoId:
+            strcpy(s_deviceInfo.mainBootloaderVer, str);
+            break;
+        case eSubSWVersionDeviceInfoId:
+            strcpy(s_deviceInfo.subSWVer, str);
+            break;
+        case eSubBootloaderVersionDeviceInfoId:
+            strcpy(s_deviceInfo.subBootloaderVer, str);
+            break;
+
+        case eChamberSerialNoDeviceInfoId:
+            strcpy(s_deviceInfo.chamberSerialNo, str);
+            break;
+        case eChamberTotalRuntimeDeviceInfoId:
+            strcpy(s_deviceInfo.chamberTotalRuntime, str);
+            break;
+        case eChamberSWVersionDeviceInfoId:
+            strcpy(s_deviceInfo.chamberSWVer, str);
+            break;
+        case eChamberBootloaderVersionDeviceInfoId:
+            strcpy(s_deviceInfo.chamberBootloaderVer, str);
+            break;
+
+        case eCradleSerialNoDeviceInfoId:
+            strcpy(s_deviceInfo.cradleSerialNo, str);
+            break;
+        case eCradleTotalRuntimeDeviceInfoId:
+            strcpy(s_deviceInfo.cradleTotalRuntime, str);
+            break;
+        case eCradleSWVersionDeviceInfoId:
+            strcpy(s_deviceInfo.cradleSWVer, str);
+            break;
+        case eCradleBootloaderVersionDeviceInfoId:
+            strcpy(s_deviceInfo.cradleBootloaderVer, str);
+            break;
+
+        case eCircuitSerialNoDeviceInfoId:
+            strcpy(s_deviceInfo.circuitSerialNo, str);
+            break;
+        case eCircuitTypeDeviceInfoId:
+            strcpy(s_deviceInfo.circuitType, str);
+            break;
+        case eCircuitStartOfUseNoDeviceInfoId:
+            strcpy(s_deviceInfo.circuitStartOfUse, str);
+            break;
+        case eCircuitUsageTimeDeviceInfoId:
+            strcpy(s_deviceInfo.circuitUsageTime, str);
+            break;
+        case eCircuitFactoryDeviceInfoId:
+           strcpy(s_deviceInfo.circuitFactory, str);
+          break;
+        default:
+            break;
+    }
+    xSemaphoreGive( s_deviceInfoMutex );
+}
+/* end of file */

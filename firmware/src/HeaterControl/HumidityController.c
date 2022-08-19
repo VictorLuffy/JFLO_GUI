@@ -1,0 +1,302 @@
+/* ************************************************************************** */
+/** @file [HumidityController.c]
+ *  @brief {A PID controller for Humidity control. This controller take input from 
+ * power supply for IH Heater, and control the water bumper to obtain the humidity
+ * setting. Humidity setting is targeted always 100% (or TBD) }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <stdint.h>
+
+#include "system_config.h"
+#include "system_definitions.h"
+
+#include "HumidityController.h"
+#include "PID.h"
+#include "PWM_Bumper.h"
+#include "HeaterTask.h"
+#include "ChamberUnit.h"
+
+/** @brief The Proportional gain of Humidity's PID controller */
+const float HUMIDITY_CONTROLLER_PID_KP = 0.05;//3.0;
+
+/** @brief The Integral gain of Humidity's PID controller */
+const float HUMIDITY_CONTROLLER_PID_KI = 0.001;//0.55;
+
+/** @brief The Derivative gain of Humidity's PID controller */
+const float HUMIDITY_CONTROLLER_PID_KD = 0;
+
+/** @brief Humidity's PID controller instance */
+static PIDController s_HumidityPidController;
+
+/** @brief current measurement flow, use as input of Humidity's PID controller */
+static float s_MeasuredPower = 0;
+
+/** @brief Function return current measurement to supply input for Humidity's PID 
+ * controller. This function will automatically called when PID controller run
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return float       current power measures from IH Heater
+ */
+static inline float HumidityController_PIDDataIn() {
+    return s_MeasuredPower;
+}
+
+/** @brief Function perform action after PID controller has been calculated. In
+ * this case, it will adjust Power on IH coil. 
+ * This function will be called automatically when PID controller has finished 
+ * calculation 
+ *  @param [in]  float output   the output result after PID controller has calculated   
+ *  @param [out]  None
+ *  @return  None
+ */
+static inline void HumidityController_PIDDataOut(float output) {
+    //PWM_Bumper_SetFrequency(output);
+  //  output = output/4;
+//    SYS_PRINT("Pump freq %.2f\n", output);
+//    output = 20;
+    Chamber_SetPumpFreq(output);
+}
+
+/** @brief Function initialize PID controller for Humidity Control and set it up before
+ * running
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return  None
+ */
+void HumidityController_Initialize() {
+    PID_CreateController(&s_HumidityPidController,
+            HUMIDITY_CONTROLLER_PID_KP,
+            HUMIDITY_CONTROLLER_PID_KI,
+            HUMIDITY_CONTROLLER_PID_KD,
+            HumidityController_PIDDataIn,
+            HumidityController_PIDDataOut);
+    PID_SetOutputBounds(&s_HumidityPidController, 1.0, 50.0);
+    PID_SetInputBounds(&s_HumidityPidController, 0.0, 200.0);//100.0;
+    PID_SetMaxIntegralCumulation(&s_HumidityPidController, 20000.0); // Set max = 40; => X/ki = 40 => x = 20000 
+    PID_SetEnabled(&s_HumidityPidController, 0);
+}
+
+
+
+/** @brief Function to Detect too much water by measuring average current power in 20 seconds
+ *  @param [in]  float measured is current power
+ *  @param [in]  float target is target power
+ *  @param [out]  None
+ *  @return true if too much water is detected
+ */
+static bool HumidityController_DetectTooMuchWater(float measured, float target, float currentTemp, float targetTemp, float envTemp)
+{
+#define NUM_SAMPLE  100
+    static float currentPower[NUM_SAMPLE] = {};
+    static float targetPower[NUM_SAMPLE] = {};
+    
+    static float currentTempChamb[NUM_SAMPLE] = {};
+    static float targetTempChamb[NUM_SAMPLE] = {};
+    
+    static uint16_t curIndex = 0;
+    static uint16_t numSample = 0;
+    
+    currentPower[curIndex] = measured;
+    targetPower[curIndex] = target;
+    
+    currentTempChamb[curIndex] = currentTemp;
+    targetTempChamb[curIndex] = targetTemp;
+    
+    curIndex++;
+    if(numSample < curIndex) numSample = curIndex;
+    curIndex = curIndex % NUM_SAMPLE;
+    
+    float averageCurrentPower = 0;
+    float averageTargetPower = 0;
+    
+    float averageCurrentTemp = 0;
+    float averageTargetTemp = 0;
+    
+    
+    if(numSample == NUM_SAMPLE)
+    {   
+        uint16_t i;
+        for(i = 0; i < NUM_SAMPLE; i++)
+        {
+            averageCurrentPower = averageCurrentPower + (currentPower[i] / NUM_SAMPLE);
+            averageTargetPower = averageTargetPower + (targetPower[i] / NUM_SAMPLE);
+            averageCurrentTemp = averageCurrentTemp + (currentTempChamb[i] / NUM_SAMPLE);
+            averageTargetTemp = averageTargetTemp + (targetTempChamb[i] / NUM_SAMPLE);
+        }
+        
+        
+        
+        if ( (averageCurrentPower > (averageTargetPower * 120 /100))
+              || (( (averageTargetTemp - averageCurrentTemp) > 0.5)&&(envTemp > 18.0))
+           ) {
+            
+                //SYS_PRINT("averageCurrentPower: %f\n", averageCurrentPower);
+                //SYS_PRINT("averageTargetPower: %f\n", averageTargetPower);
+                //SYS_PRINT("averageCurrentTemp: %f\n", averageCurrentTemp);
+                //SYS_PRINT("averageTargetTemp: %f\n", averageTargetTemp);
+                return true;
+        }
+               
+        else if ((averageCurrentPower < (averageTargetPower * 105 /100)) && (currentTemp >= targetTemp))
+            
+            return false;
+    }
+    return false;
+}
+
+/** @brief Function to prevent too much water by turning on or off water pump
+ *  @param [in]  float measured is current power
+ *  @param [in]  float target is target power
+ *  @param [out]  None
+ *  @return None
+ */
+static void HumidityController_HandlePreventTooMuchWater(float measured, float target, float currentTemp, float targetTemp, float envTemp)
+{
+    static bool prevState = false;
+    bool currState = HumidityController_DetectTooMuchWater(measured, target, currentTemp, targetTemp, envTemp);
+    if(prevState != currState)
+    {
+        prevState = currState;
+        if (currState == true)
+        {   
+            SYS_PRINT("turn off water pump to prevent too much water\n");
+            HeaterTask_TurnOffWaterPump();
+            
+        }
+        else
+        {
+            SYS_PRINT("re-turn on water pump \n");
+            HeaterTask_TurnOnWaterPump();
+        }
+    }
+}
+
+
+/** @brief Function perform PID controller calculation with measurement value is 
+ * obtained from IH power, and the target is Humidity setting
+ *  @param [in]     float measured     measurement value
+ *                  float target    target value
+ *  @param [out]  None
+ *  @return float       result after PID calculation, in this case, the frequency
+ * to set to Water bumper
+ */
+float HumidityController_Operate(float measured, float target, float currentTemp, float targetTemp, float envTemp) {
+    s_HumidityPidController.target = target;
+    s_MeasuredPower = measured;
+    //SYS_PRINT("PID_Calculate before Integral :%.2f \n", s_HumidityPidController.integralCumulation);
+    PID_Calculate(&s_HumidityPidController);
+    //SYS_PRINT("PID_Calculate after Integral :%.2f \n", s_HumidityPidController.integralCumulation);
+    //(measured, target, currentTemp, targetTemp, envTemp);
+            
+    return s_HumidityPidController.output;
+}
+float GetIntegralComponent()
+{
+   return PID_GetIntegralComponent(&s_HumidityPidController);
+    
+}
+
+float GetDerivativeComponent()
+{
+   return PID_GetDerivativeComponent(&s_HumidityPidController);
+    
+}
+
+float GetProportionalComponent()
+{
+   return PID_GetProportionalComponent(&s_HumidityPidController);
+    
+}
+
+/** @brief Function to anable / disable Humidity's PID controller
+ *  @param [in]  bool enable     enable = 1/ disable = 0
+ *  @param [out]  None
+ *  @return None
+ */
+void HumidityController_Enable(bool enable) {
+    if (enable) {
+        PID_SetEnabled(&s_HumidityPidController, 1);
+    } else {
+        PID_SetEnabled(&s_HumidityPidController, 0);
+    }
+}
+
+/** @brief Function to set target of Humidity's PID controller. In this case, target 
+ * is the Humidity setting value
+ *  @param [in]  float target     target to apply to Humidity's PID controller
+ *  @param [out]  None
+ *  @return None
+ */
+void HumidityController_SetTarget(float target) {
+    s_HumidityPidController.target = target;
+}
+
+void HumidityControler_Set_Init(float pumpFreq, float currentPower, float targetPower){
+    float integralInit = (pumpFreq - ((targetPower - currentPower)*s_HumidityPidController.p))/s_HumidityPidController.i - ((targetPower - currentPower)*30);
+    s_HumidityPidController.integralCumulation = integralInit;
+     SYS_PRINT("Init Integral to :%.2f \n", s_HumidityPidController.integralCumulation);
+}
+
+
+//int I_sigma_delta_1(float currentPower, float targetPower ) {
+//    static int sigma_delta_wave_prev = 0;
+//    int out = 0;
+//    static float integrator_main = 0;
+//    static float integrator_sub = 0;    
+//    float gain_sub = 0.02;
+//    float gain_main = 2.5*targetPower;
+//    
+//    float Error = targetPower - currentPower;
+//    
+//    integrator_sub +=gain_sub*Error;
+////    if(integrator_sub >= 100)
+////    {
+////        integrator_sub = 100;
+////    }
+////    if(integrator_sub <= -100)
+////    {
+////        integrator_sub = -100;
+////    }
+////     
+//    integrator_main += Error + integrator_sub - (float) sigma_delta_wave_prev * gain_main;
+////
+////    if(integrator_main >= 300)
+////    {
+////        integrator_main = 300;
+////    }
+////    if(integrator_main <= -300)
+////    {
+////        integrator_main = -300;
+////    }
+//    
+//    if (integrator_main > 0.0) {
+//        out = 1;
+//    } else {
+//        out = -1;
+//    }
+//
+//    sigma_delta_wave_prev = out;
+//
+//    SYS_PRINT("integrator_sub  %.2f integrator_main  %.2f output %d Error  %.2f \n", integrator_sub, integrator_main, out, Error);
+//    return out;
+//}
+
+void HumidityControler_SetPumpLimit(float lowerLimit, float upperLimit)
+{
+    PID_SetOutputBounds(&s_HumidityPidController, lowerLimit, upperLimit);
+    //SYS_PRINT("set power upper limit to: %.2f\n", 100*(sqrtf(upperLimit)/20));
+}
+
+ void HumidityController_SetMaxintegral(float maxValue)
+ {
+  PID_SetMaxIntegralCumulation(&s_HumidityPidController, (maxValue/s_HumidityPidController.i));
+ }
+/* *****************************************************************************
+ End of File
+ */

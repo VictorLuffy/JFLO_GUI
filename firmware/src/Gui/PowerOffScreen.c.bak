@@ -1,0 +1,202 @@
+/** @file PowerOffScreen.c
+ *  @brief The screen provides graphic interface to power off notification
+ *  @author Thanh Duong
+ */
+
+/* this section lists the other files that are included in this file
+ */
+#include "PowerOffScreen.h"
+#include "SystemInterface.h"
+#include "Gui/DisplayControl.h"
+#include "Gui/Setting.h"
+#include <stdio.h>
+#include <stdbool.h>
+#include "DeviceInterface.h"
+#include "Audio.h"
+
+//#define TICK_0MS    0
+//#define TICK_1000MS 1000
+//#define TICK_2000MS 2000
+//#define TICK_3000MS 3000
+//#define TICK_4000MS 4000
+//#define TICK_5000MS 5000
+
+static uint16_t gs_poweroffTick = 0;
+
+static void PowerOffScreen_CheckSetIndicator(void);
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_Initialize(void)
+{
+    SYS_PRINT("\nPower off screen init");
+   PowerOffScreen_SetIndicatorVisible(false);
+}
+//
+///** @brief
+// *  @param [in]
+// *  @param [out]
+// *  @return None
+// */
+//void PowerOffScreen_UpdatePoweroffCounter(void)
+//{
+//    char strbuff[255] = {0};
+//    laString str;
+//    uint16_t calculatedTick;
+//    if (gs_poweroffTick == 0)
+//    {
+//        gs_poweroffTick = (uint16_t)xTaskGetTickCount();
+//    }
+//    calculatedTick = (uint16_t)xTaskGetTickCount() - gs_poweroffTick;
+//    
+//    sprintf(strbuff, "%s", "Power Off after\n");
+//    sprintf(&strbuff[16], "%d ", 1);
+//    sprintf(&strbuff[19], "%s", 1);
+//    str = laString_CreateFromCharBuffer(strbuff, &AbelRegular_S20_Bold_Internal);
+//
+//    laLabelWidget_SetText(labelPowerOffAdditionalMessage,  str);
+//
+//    laString_Destroy(&str); 
+//    if (calculatedTick >= 1000 && calculatedTick < 2000)
+//    {
+//        sprintf(strbuff, "%s", "Power Off after\n");
+//        sprintf(&strbuff[16], "%d ", 1);
+//        sprintf(&strbuff[19], "%s", 1);
+//        str = laString_CreateFromCharBuffer(strbuff, &AbelRegular_S20_Bold_Internal);
+//
+//        laLabelWidget_SetText(labelPowerOffAdditionalMessage,  str);
+//
+//        laString_Destroy(&str); 
+//    }
+//    else if (calculatedTick >= 2000 && calculatedTick < 3000)
+//    {
+//        sprintf(strbuff, "%s", "Power Off after\n");
+//        sprintf(&strbuff[16], "%d ", 2);
+//        sprintf(&strbuff[19], "%s", 2);
+//        str = laString_CreateFromCharBuffer(strbuff, &AbelRegular_S20_Bold_Internal);
+//
+//        laLabelWidget_SetText(labelPowerOffAdditionalMessage,  str);
+//
+//        laString_Destroy(&str); 
+//    }
+//    else if (calculatedTick >= 3000 && calculatedTick < 4000)
+//    {
+//        
+//    }
+//    else if (calculatedTick >= 4000 && calculatedTick < 5000)
+//    {
+//        
+//    }
+//    else if (calculatedTick >= 5000)
+//    {
+//        
+//    }
+//}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_ReInitialize(void)
+{
+   PowerOffScreen_Initialize();
+}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_SetIndicatorVisible(bool flag)
+{
+    laBool f;
+    if (flag)
+    {
+        f = LA_TRUE;
+    }
+    else
+    {
+        f = LA_FALSE;
+    }
+    laWidget_SetVisible((laWidget*)labelPowerOffAdditionalMessage, f);
+    laWidget_SetVisible((laWidget*)panelPowerOffAlarmIndicatorTop, f);
+    laWidget_SetVisible((laWidget*)panelPowerOffAlarmIndicatorBottom, f);
+    laWidget_SetVisible((laWidget*)panelPowerOffAlarmIndicatorLeft, f);
+    laWidget_SetVisible((laWidget*)panelPowerOffAlarmIndicatorRight, f);
+}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_Run(void)
+{
+//    SYS_PRINT("\nRUN.");
+    PowerOffScreen_CheckSetIndicator();
+//    PowerOffScreen_UpdatePoweroffCounter();
+}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_Distructor(void)
+{
+    
+}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+static void PowerOffScreen_CheckSetIndicator(void)
+{
+    float o2Flow;
+    
+    o2Flow = DisplayControl_GetDataO2Flow();
+//    o2Flow = 2.0;
+    if (o2Flow > 1.0)
+    {
+        PowerOffScreen_SetIndicatorVisible(true);
+    }
+    else
+    {
+        PowerOffScreen_SetIndicatorVisible(false);
+    }
+}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_CheckSetSound(void)
+{
+    float o2Flow;
+    o2Flow = DisplayControl_GetDataO2Flow();
+    if (o2Flow > 1.0)
+    {
+        deviceInterface_SendAudioEvent(ePlayLow1Alarm, setting_Get(eSpeakerVolumeSettingId));
+    }
+    else
+    {
+        deviceInterface_SendAudioEvent(eStopPlay, 0);
+    }
+}
+
+/** @brief
+ *  @param [in]
+ *  @param [out]
+ *  @return None
+ */
+void PowerOffScreen_StopSound(void)
+{
+    deviceInterface_SendAudioEvent(eStopPlay, 0);
+}

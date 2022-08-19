@@ -1,0 +1,538 @@
+/* ************************************************************************** */
+/** @file [PowerManagement.h]
+ *  @brief {Power Management module manage power, supply power for the system
+ * including control the charging, consider the condition to decide the power is used is AC or
+ * cradle battery or internal battery}
+ *  @author {nguyen truong}
+ */
+/* ************************************************************************** */
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <float.h>
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+#include "system_config.h"
+#include "system_definitions.h"
+
+#include "I2C_2.h"
+#include "PowerManagement.h"
+#include "Charger.h"
+#include "SmartBattery.h"
+#include "Cradle.h"
+#include "GuiInterface.h"
+#include "OperationManager.h"
+#include "MotorTask.h"
+//#include "AlarmInterface.h"
+//#include "ApplicationDefinition.h"
+extern void _SYS_DelayMs(uint16_t ms);
+typedef enum
+{  
+    eIdle,
+    eACConnect,
+    eACDisconnect,        
+    eConfigInternalBatteryCharing,
+    eStopCharging,           
+}E_POWER_MANAGEMENT_HANDLE_STATE;
+
+/** @brief store connection state of DC power*/
+static bool  gs_ACConnectState;
+
+/** @brief store connection state of Internal Battery*/
+static bool  gs_mainBattConnectState;
+
+/** @brief store connection state of Cradle*/
+static bool  gs_cradleConnectState;
+
+/** @brief store terminate charge of Internal Battery*/
+static bool  gs_terminateChargeState;
+
+/** @brief store state of AC state */ 
+static bool s_ACOKState;
+
+static E_POWER_MANAGEMENT_HANDLE_STATE gs_handleState = eIdle;
+
+/** @brief store charge option for internal charger*/
+static  E_ChargeOption gs_ChargeOption = (ACOK_DEGLITCH_TIME_1300MS
+                | DISABLE_WATCHDOG_TIMER
+                | FALLING_THRESHOLD_71_PERCENT
+                | REDUCE_PWM_SW_FRE
+                | DISABLE_PWM_SW_FRE
+                | DISABLE_SHORT_CIRCUIT_PROTECT_HI//ENABLE_SHORT_CIRCUIT_PROTECT_HI
+                | ENABLE_SHORT_CIRCUIT_PROTECT_LOW_230MV//ENABLE_SHORT_CIRCUIT_PROTECT_LOW_135MV
+                | DISABLE_LEARN_CYCLE
+                | IOUT_ADAPTER_SEL
+                | DISABLE_BOOST
+                | ACOC_THRESHOLD_333X
+                | ENABLE_CHARGE) ;//0x9902 
+
+/** @brief configure internal charger
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ *  @retval None
+ */
+ static void powerManagement_ConfigureInternalCharger()
+{    
+    //SYS_PRINT("Start Charge battery\n");
+    charger_SetChargeOption(gs_ChargeOption);
+    charger_SetInputCurrent(8064);//mAh
+    charger_SetChargeCurrent(1035);//mAh
+    
+    //checking state of health (SOH) battery, SOH is the ratio of FullChargeCapacity() and DesignCapacity()
+    if(smartBattery_GetStateOfHealth() >= 70)
+    {
+        charger_SetChargeVoltage(16800);//mV
+        SYS_PRINT ("charger SetChargeVoltage 16800mV, ChargeCurrent 1035mA\n");
+    }
+    else
+    {
+        charger_SetChargeVoltage(16600);//mV
+        SYS_PRINT ("charger SetChargeVoltage 16600mV, ChargeCurrent 1035mA\n");
+    }
+}
+ 
+ /** @brief Stop charging Main Battery
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ *  @retval None
+ */
+ static void powerManagement_StopChargeMainBattery()
+{   
+    //SYS_PRINT("Stop Charge battery\n");
+    E_ChargeOption opt = gs_ChargeOption | INHIBIT_CHARGE; 
+    charger_SetChargeOption(opt);       
+}
+ 
+ 
+/** @brief Set power to system from AC source
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ */
+ static void powerManagement_SetPowerToSystemFromAC(void)
+ {
+      //Set GPIO VIN_BYPASS to level 0
+      VIN_BYPASSOff();
+      //Set GPIO VBQ_BYPASS to level 0
+      VBQ_BYPASSOff();
+ }
+
+ /** @brief Set power to system from Cradle Battery
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ */
+ static void powerManagement_SetPowerToSystemFromCradleBattery(void)
+ {
+      //Set GPIO VIN_BYPASS to level 1
+      VIN_BYPASSOn();
+      //Set GPIO VBQ_BYPASS to level 1
+      VBQ_BYPASSOn();
+ }
+  
+ /** @brief Set power to system from Main Battery
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ */
+ static void powerManagement_SetPowerToSystemFromMainBattery(void)
+ {
+      //Set GPIO VIN_BYPASS to level 1
+      VIN_BYPASSOff();
+      //Set GPIO VBQ_BYPASS to level 0
+      VBQ_BYPASSOff();
+ }
+  
+ /** @brief check the condition of battery if terminate charge condition occurs
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return true if terminate charge condition occurs
+ *  @return false if terminate charge condition does not occur
+ */
+static bool powerManagement_CheckBatteryTerminateChargeStatus(void)
+{
+    uint16_t status = smartBattery_GetStatus();
+    if ( (status && OVER_CHARGED_ALARM)
+      ||(status && TERMINATE_CHARGE_ALARM)
+      ||(status && OVER_TEMP_ALARM)
+         ||(status && BATTERY_FULLY_CHARGED))
+    {
+        return true;
+    }
+    else{
+        return false;
+    }
+}
+
+void powerManagement_UpdateACOKState(){
+    static int counter = 0;
+    if (ACOKStateGet() != s_ACOKState) // state changed
+    {
+        if (counter++ > 50) // task period is 10MS
+        {
+            s_ACOKState = ACOKStateGet();
+            counter = 0;
+        }
+    }
+    else // no state changed
+    {
+        counter = 0;
+    }    
+}
+bool powerManagement_ACOKStateGet()
+{
+    return s_ACOKState;    
+}
+
+static bool powerManagement_UpdateScreenStatus()
+{
+    static bool s_PrevACConnectStatus = false;
+    static bool s_PrevMainBatteryConnectStatus = false;
+    static E_ConnectState s_PrevCradleBatteryConnectStatus = eDisconnect;
+    static E_ConnectState s_PrevCradleConnectStatus = eConnect;
+    
+    static uint16_t s_PrevMainBatteryPercentage = 0;
+    static uint16_t s_PrevCradleBatteryPercentage = 0;
+    
+    bool currentACConnectStatus = powerManagement_ACOKStateGet();//true is AC connect
+    E_ConnectState currentCradleBatteryConnectStatus = cradle_GetCradleConnection();
+    bool currentMainBatteryConnectStatus =  BAT_DETECTStateGet();// false is battery connect
+    E_ConnectState currentCradleConnectStatus = cradle_GetCradleConnection();
+    
+    uint16_t currentMainBatteryPercentage = smartBattery_GetRemainingPercentage();
+    uint16_t currentCradleBatteryPercentage = cradle_GetBatteryRemainingPercent();
+    
+    
+    //SYS_PRINT("currentCradleBatteryPercentage %d\n", currentCradleBatteryPercentage);
+    //SYS_PRINT("currentCradleBatteryConnectStatus %d\n", currentCradleBatteryConnectStatus);
+    
+    
+    //update AC connection status to screen
+    if (s_PrevACConnectStatus != currentACConnectStatus)
+    {
+        s_PrevACConnectStatus = currentACConnectStatus;
+        if(currentACConnectStatus == true )
+          guiInterface_SendEvent(eGuiMainScreenACPowerStatusChange, eACPowerConnect);
+        else
+          guiInterface_SendEvent(eGuiMainScreenACPowerStatusChange, eACPowerDisconnect);
+    }
+    
+      
+    
+    //update level main remaining capacity battery to screen
+    if (s_PrevMainBatteryPercentage != currentMainBatteryPercentage)
+    {
+        s_PrevMainBatteryPercentage = currentMainBatteryPercentage;
+        if(currentMainBatteryPercentage < 5)
+        {
+            guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel0);
+        }
+        else if ((currentMainBatteryPercentage >= 5)&&(currentMainBatteryPercentage < 20))
+        {
+            guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel1);
+        }
+        else if ((currentMainBatteryPercentage >= 20)&&(currentMainBatteryPercentage < 50))
+        {
+            guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel2);
+        }
+        else if ((currentMainBatteryPercentage >= 50)&&(currentMainBatteryPercentage < 75))
+        {
+            guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel3);
+        }
+        else
+        {
+            guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel4);
+        }
+          
+    }
+    
+    //update level main battery connect status to screen
+    if(s_PrevMainBatteryConnectStatus != currentMainBatteryConnectStatus)
+    {
+        s_PrevMainBatteryConnectStatus = currentMainBatteryConnectStatus;
+        if(currentMainBatteryConnectStatus == false)
+        {
+            if(currentMainBatteryPercentage < 5)
+            {
+                guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel0);
+            }
+            else if ((currentMainBatteryPercentage >= 5)&&(currentMainBatteryPercentage < 20))
+            {
+                guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel1);
+            }
+            else if ((currentMainBatteryPercentage >= 20)&&(currentMainBatteryPercentage < 50))
+            {
+                guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel2);
+            }
+            else if ((currentMainBatteryPercentage >= 50)&&(currentMainBatteryPercentage < 75))
+            {
+                guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel3);
+            }
+            else
+            {
+                guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryLevel4);
+            }
+        }
+        else
+        {
+            guiInterface_SendEvent(eGuiMainScreenInternalBatteryStatusChange, eBatteryDisconnect);
+        }
+    }
+    
+    
+    /*************************************************************************/
+   
+    //update level cradle remaining capacity battery to screen
+    if (s_PrevCradleBatteryPercentage != currentCradleBatteryPercentage)
+    {
+        s_PrevCradleBatteryPercentage = currentCradleBatteryPercentage;
+        if(currentCradleBatteryPercentage < 5)
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel0);
+        }
+        else if ((currentCradleBatteryPercentage >= 5)&&(currentCradleBatteryPercentage < 20))
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel1);
+        }
+        else if ((currentCradleBatteryPercentage >= 20)&&(currentCradleBatteryPercentage < 50))
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel2);
+        }
+        else if ((currentCradleBatteryPercentage >= 50)&&(currentCradleBatteryPercentage < 75))
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel3);
+        }
+        else
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel4);
+        }
+          
+    }
+    
+    //update level cradle battery connect status to GUI
+    if(s_PrevCradleBatteryConnectStatus != currentCradleBatteryConnectStatus)
+    {
+        s_PrevCradleBatteryConnectStatus = currentCradleBatteryConnectStatus;
+        if(currentCradleBatteryConnectStatus == eConnect)
+        {
+            if(currentCradleBatteryPercentage < 5)
+            {
+                guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel0);
+            }
+            else if ((currentCradleBatteryPercentage >= 5)&&(currentCradleBatteryPercentage < 20))
+            {
+                guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel1);
+            }
+            else if ((currentCradleBatteryPercentage >= 20)&&(currentCradleBatteryPercentage < 50))
+            {
+                guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel2);
+            }
+            else if ((currentCradleBatteryPercentage >= 50)&&(currentCradleBatteryPercentage < 75))
+            {
+                guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel3);
+            }
+            else
+            {
+                guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryLevel4);
+            }
+        }
+        else
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryDisconnect);
+        }
+    }
+    
+    
+    //update cradle connection status to screen
+    if(s_PrevCradleConnectStatus != currentCradleConnectStatus)
+    {
+        s_PrevCradleConnectStatus = currentCradleConnectStatus;
+        if(currentCradleConnectStatus == eConnect)
+        {
+          
+        }
+        else
+        {
+            guiInterface_SendEvent(eGuiMainScreenExternalBatteryStatusChange, eBatteryDisconnect);
+        }
+    }
+}
+
+ /** @brief Check the power condition to select the power to system
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ */ 
+void powerManagement_PowerControl()
+{    
+    if(powerManagement_ACOKStateGet() == true) //AC connect
+    {
+        powerManagement_SetPowerToSystemFromAC();
+        //SYS_PRINT("power from AC\n");
+    }
+    else //AC Disconnect
+    {
+        uint16_t cradleBattVolt = 0;
+        uint16_t mainBattVolt = 0;
+        
+        //if(cradle_ReadBatteryVoltage(&cradleBattVolt) == true)
+        cradleBattVolt = cradle_GetBatteryVoltage();
+        {
+            float fcradleBattVolt = (float)cradleBattVolt / 1000.0;
+            //SYS_PRINT("Cradle battery voltage %.2f\n",fcradleBattVolt);
+
+            mainBattVolt = smartBattery_GetVoltage();
+            if(mainBattVolt > 0)
+            {
+                float fmainBattVolt = (float)mainBattVolt / 1000.0;
+                //SYS_PRINT("main battery voltage %.2f\n",fmainBattVolt);
+
+                //battery cradle connect & volt > 14 V
+                if(fcradleBattVolt > 14.0)
+                {
+                    //set power to system from cradle battery
+                    powerManagement_SetPowerToSystemFromCradleBattery();
+                    //SYS_PRINT("power from cradle\n");
+                }
+                else if (fmainBattVolt > 14.0)
+                //else if main battery voltage > 14 V
+                {
+                    //set power to system from cradle battery            
+                    powerManagement_SetPowerToSystemFromMainBattery();
+                    //SYS_PRINT("power from main battery\n");
+                }
+                else // main battery voltage < 14 V
+                {
+                    //power off system;
+                    SYS_PRINT("low battery >>> power off\n");
+                    //display pop up on GUI
+//                    guiInterface_SendEvent(eGuiTurnOffMachineId, 0);
+//                    //stop heater
+//                    HEATER_CTRL_EVENT_t hEvent = {.id = eHeaterStopId};
+//                    HeaterTask_SendEvent(hEvent);
+//                    vTaskDelay(5000);
+//                    //stop motor
+//                    MOTOR_CTRL_EVENT_t mEvent = {.id = eMotorStopId};
+//                    MotorTask_SendEvent(mEvent);
+                    OperationMgr_PowerOffSystem();
+                }
+            }
+        }
+    }
+    
+    static uint16_t cnt = 0;
+    if(cnt >= 11000/200)
+    {
+        powerManagement_UpdateScreenStatus();
+    }
+    else cnt++;
+}
+        
+/** @brief Get remaining  capacity (percentage) of battery 
+/** @brief run task for handling battery, including
+ * read data from battery and control charging
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ */
+void powerManagement_Handle()
+{    
+    switch (gs_handleState)
+    {
+        case eIdle:
+            //check AC connection state
+            if((powerManagement_ACOKStateGet() == true) && (gs_ACConnectState == false))
+            {
+                //AC connect
+                gs_handleState = eConfigInternalBatteryCharing;
+            }
+            gs_ACConnectState = powerManagement_ACOKStateGet();
+            
+            //check battery connection state
+            //if BATT_CONNECTED pin goes low , battery is connected           
+            if((BAT_DETECTStateGet() == false) && (gs_mainBattConnectState == true))
+            {
+                gs_handleState = eConfigInternalBatteryCharing;
+            }
+            if((BAT_DETECTStateGet() == true) && (gs_mainBattConnectState == false))
+            {
+                powerManagement_StopChargeMainBattery();
+            }
+            gs_mainBattConnectState = BAT_DETECTStateGet();
+            
+            
+            //check terminate charge state condition          
+            bool currTerminateChargeState = powerManagement_CheckBatteryTerminateChargeStatus();
+            if ((currTerminateChargeState == true)&&(gs_terminateChargeState == false))
+            {
+                //terminate charge
+                powerManagement_StopChargeMainBattery();
+            }
+            
+            
+            //check continue charging condition 
+            if ((currTerminateChargeState == false)&&(gs_terminateChargeState == true))
+            {
+                //continue charging
+                gs_handleState = eConfigInternalBatteryCharing;
+            }
+            gs_terminateChargeState = currTerminateChargeState;
+                       
+            break;
+            
+        case eConfigInternalBatteryCharing:
+            //if main battery connect & not full
+            if ((BAT_DETECTStateGet() == false)//battery connected
+                &&(powerManagement_ACOKStateGet() == true))//AC connected
+            {
+                powerManagement_ConfigureInternalCharger();
+                gs_handleState = eIdle;
+            }
+            else//battery disconnect or is full charge
+            {    
+                //charge cradle battery
+                gs_handleState = eIdle;
+            }            
+            break;
+                       
+        case eStopCharging:
+
+            break;
+        default:
+            break;
+    }
+
+}
+
+
+/** @brief Get AC connection current status
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return true if AC connected
+ *  @return false if AC disconnected
+ */
+bool powerManagement_GetACConnectionState()
+{
+    return gs_ACConnectState;
+}
+
+/** @brief Get cradle connection current status
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return true if AC connected
+ *  @return false if AC disconnected
+ */
+bool powerManagement_GetCradleConnectionState()
+{
+    return gs_cradleConnectState;
+}

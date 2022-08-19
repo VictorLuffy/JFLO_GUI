@@ -1,0 +1,183 @@
+/* ************************************************************************** */
+/** @file [TaskIdle.c]
+ *  @brief {Task Idle is design to run every task has Idle priority ( priority 0)
+ * such as: GUI task, Command Processor Task, ... This design is to optimize 
+ * performance of GUI task and system memory }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+
+/* This section lists the other files that are included in this file.
+ */
+#include "system_config.h"
+#include "system_definitions.h"
+
+#include "FileSystemMgr.h"
+#include "GuiTask.h"
+#include "CommandProcessor.h"
+#include "GuiTask.h"
+#include "SystemInterface.h"
+#include "GuiDefine.h"
+#include "SQIInterface.h"
+#include "GuiInterface.h"
+#include "Delay.h"
+#include "USBInterface.h"
+#include "SoftwareUpgrade.h"
+#include "RTC_BQ32002.h"
+#include "Cradle.h"
+#include "common.h"
+#include "GT911.h"
+
+//TODO: debug only
+#include "DisplayControl.h"
+
+//#define CHECK_REMAINING_STACK_SIZE
+
+
+/** @brief Stack size of Idle task */
+#define 	GUI_TASK_STACK                  (1024) // 8K word 
+/** @brief Declare Device task periodic */
+#define     GUI_TASK_PERIODIC_MS            (5)     //5 ms
+/** @brief RTC time update periodic */
+#define     GUI_TIME_UPDATE_PERIODIC_MS     (500)     //500 ms
+
+extern E_GT911StateID s_GT911OperationState;
+extern bool g_isUpgradeFirmware;
+
+/** @brief internal functions */
+static void GuiTask_Func(void);
+
+/** @brief Initialize Idle Task, and all tasks run inside Idle Task such as:
+ * GUI task, Command Processor task ... 
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void GuiTask_Initialize()
+{
+    //initialize GUI task
+    GUI_Initialize();
+    //initialize Command Processor task
+    CmdProcessor_Initialize();
+    //Init software upgrade
+    softwareUpgrade_Init();
+    //Init system interface
+    systemInterface_Init();
+
+    return;
+}
+
+/** @brief Create a task to run in Idle priority
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void GuiTask_Create()
+{
+    xTaskCreate((TaskFunction_t) GuiTask_Func,
+                "Gui Task",
+                GUI_TASK_STACK, NULL, tskIDLE_PRIORITY, NULL);
+}
+
+/** @brief Idle task function, include all task need to run in Idle priority
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+static void GuiTask_Func(void)
+{
+//#ifndef JFLO_DEBUG_GUI
+    rtc_CheckValidTime();
+//#endif 
+    GUI_Prepare();
+    
+    //SYS_PRINT("\n START APP ***************** ");
+    
+    vTaskDelay(100);
+
+    //Record execution time
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    
+    //Counter 500 ms
+    uint16_t countUpdateTime = 0;
+    
+#ifdef CHECK_REMAINING_STACK_SIZE
+	UBaseType_t uxHighWaterMark;
+	uint32_t cnt = 0;
+#endif
+    
+    while (1)
+    {
+        //if(VideoScreen_IsFinished())
+        {
+        //    monitor_UpdateStartedTime(eGUI);
+        }
+        if(countUpdateTime >= (GUI_TIME_UPDATE_PERIODIC_MS/GUI_TASK_PERIODIC_MS))
+        {
+            countUpdateTime = 0;
+//            if(s_GT911OperationState == eTouchIdleStateID){
+                rtc_ReadTime();
+//            }
+        }
+        else
+        {
+            countUpdateTime++;
+        }
+        GUI_Task();
+
+        //File system maintain
+        FileSystemMgr_Task();
+        
+        setting_CheckPowerMode();
+        
+//        //Bootloader 
+//        Bootloader_Tasks();
+//
+//        static int countOfBootloaderReadFile = 0;
+//        if(g_PrevUpgradeState != g_UpgradeState)
+//        {
+//            g_PrevUpgradeState = g_UpgradeState;
+//            if(g_UpgradeState == BOOTLOADER_ERROR)
+//            {
+//                SYS_PRINT("BOOTLOADER_ERROR\n");
+//                guiInterface_SendEvent(eGuiUpdateScreenMessageUpdateFailed, 0);
+//            }
+//            if(g_UpgradeState == BOOTLOADER_CLOSE_DATASTREAM)
+//            {
+//                SYS_PRINT("BOOTLOADER_CLOSE_DATASTREAM\n");
+//            }
+//            if(g_UpgradeState == BOOTLOADER_READ_FILE)
+//            {
+//                SYS_PRINT("BOOTLOADER_READ_FILE\n");
+//                countOfBootloaderReadFile = 0;
+//            }
+//            if(g_UpgradeState == BOOTLOADER_UPDATE_COMPLETE)
+//            {
+//                SYS_PRINT("BOOTLOADER_UPDATE_COMPLETE\n");
+//            }               
+//        }
+//        if(g_UpgradeState == BOOTLOADER_READ_FILE ) //&& countOfBootloaderReadFile % 5 == 0)
+//        {
+//            countOfBootloaderReadFile++;
+//            static int pre_percent = 0;
+//            int percent = countOfBootloaderReadFile*512*100 / sizeOfMainboardFirmware;
+//            if (percent != pre_percent)
+//            {
+//                pre_percent = percent;
+//                SYS_PRINT("BOOTLOADER_READ_FILE update status %d / %d \n", countOfBootloaderReadFile*512, sizeOfMainboardFirmware);
+//                guiInterface_SendEvent(eGuiUpdateScreenMessageUpdatingMainboardFirmwareStatus, percent);
+//                vTaskDelay(50);
+//            }
+//        }
+        
+        vTaskDelayUntil(&xLastWakeTime, 5);
+    }
+}
+
+/* *****************************************************************************
+ End of File
+ */

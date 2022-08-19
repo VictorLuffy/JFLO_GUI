@@ -1,0 +1,116 @@
+/* ************************************************************************** */
+/** @file [WaterSupplyCtrl.h]
+ *  @brief Water in tank is supplied by water pump which integrated in cradle. When the main unit
+ *  is removed from the cradle for use, the water in the tank should be enough for at least 30 minutes.
+ *  This water control function is responsible for keeping the tank full.
+ *  @author {truong nguyen}
+ */
+/* ************************************************************************** */
+
+/* This section lists the other files that are included in this file.
+ */
+#include "system_config.h"
+#include "system_definitions.h"
+
+#include "WaterSupplyCtrl.h"
+
+#include "Cradle.h"
+#include "ChamberUnit.h"
+
+
+/** @brief Declare Device task periodic, millisecond unit */
+#define    DEVICE_TASK_PERIODIC_MS                 (10)       
+/** @brief Declare max time pump is on, minute unit */
+#define    PUMP_ON_MAX_TIME                         (2)         
+/** @brief Declare max time count pump is on, minute unit */
+#define    PUMP_ON_MAX_TIME_COUNT     (PUMP_ON_MAX_TIME*60/DEVICE_TASK_PERIODIC_MS)
+
+/** @brief prohibition status for pump */
+static bool gs_PumpProhibit = false;
+
+/** @brief current pump operation state */
+static E_OnOffState gs_PumpCurrentState = eOff;
+/** @brief previous pump operation state */
+static E_OnOffState gs_PumpPrevState = eOff;
+
+
+/** @brief Calibrate current sensor by calculating the offset voltage
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @retval true    if calibration success
+ *  @retval false   if calibration false
+ */
+void waterSupplyCtrl_ProhibitPump(void)
+{
+    gs_PumpProhibit = true;
+    gs_PumpCurrentState = eOff; 
+}
+
+/** @brief 
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @retval true    if calibration success
+ *  @retval false   if calibration false
+ */
+void waterSupplyCtrl_Run(void)
+{
+    E_TankWaterLevel currentWaterLevel = Chamber_GetTankWaterLevel();
+    static uint32_t s_CountTimePumpOn = 0;
+    
+    // there is no any alarm
+    if (gs_PumpProhibit == false)
+    {
+        //Tank is not full
+        if(eTankIsNotFull == currentWaterLevel)
+        {
+            //set pump on
+            currentWaterLevel = eOn;
+            //increase time
+            s_CountTimePumpOn++;
+            //pump run over than 2 minutes
+            if(s_CountTimePumpOn >= PUMP_ON_MAX_TIME_COUNT)
+            {    
+                //set pump off
+                currentWaterLevel = eOff;
+                //prohibit pump
+                waterSupplyCtrl_ProhibitPump();
+            }
+        }
+        //Tank is full
+        if(eTankIsFull == currentWaterLevel)
+        {
+            //clear time count
+            s_CountTimePumpOn = 0;
+            //set pump off
+            currentWaterLevel = eOff;
+        }
+    }
+    
+    //update pump state
+    if(gs_PumpPrevState != gs_PumpCurrentState)
+    {
+        E_ConnectState cradleConnectState = cradle_GetCradleConnection();
+        if(cradleConnectState == eConnect)
+        {
+            cradle_SetWaterSupplyOnOff(gs_PumpCurrentState);
+            gs_PumpPrevState = gs_PumpCurrentState;
+        }
+    }
+}
+
+/** @brief Handle Water Supply Control
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @retval 
+ */
+void waterSupplyCtrl_Handle()
+{
+    E_ConnectState cradleConnectState = cradle_GetCradleConnection();
+    if(cradleConnectState == eConnect)
+    {
+        waterSupplyCtrl_Run();
+    }
+}
+/* *****************************************************************************
+ End of File
+ */

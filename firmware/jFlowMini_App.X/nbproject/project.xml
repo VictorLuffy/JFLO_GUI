@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.netbeans.org/ns/project/1">
+    <type>com.microchip.mplab.nbide.embedded.makeproject</type>
+    <configuration>
+        <Harmony xmlns="Harmony" MHC="true"/>
+        <data xmlns="http://www.netbeans.org/ns/make-project/1">
+            <name>jFlowMini_App</name>
+            <creation-uuid>e54023e9-3948-44ef-bf6f-29d8b223e555</creation-uuid>
+            <make-project-type>0</make-project-type>
+            <c-extensions>c,S</c-extensions>
+            <cpp-extensions/>
+            <header-extensions>h</header-extensions>
+            <asminc-extensions/>
+            <sourceEncoding>ISO-8859-1</sourceEncoding>
+            <make-dep-projects>
+                <make-dep-project>../../../jFlowMini_Bootloader/firmware/jFlowMini_Bootloader.X</make-dep-project>
+            </make-dep-projects>
+            <sourceRootList>
+                <sourceRootElem>../src</sourceRootElem>
+                <sourceRootElem>../../..</sourceRootElem>
+                <sourceRootElem>..\src</sourceRootElem>
+                <sourceRootElem>..\src\default</sourceRootElem>
+                <sourceRootElem>..\src\system_config\default</sourceRootElem>
+                <sourceRootElem>..\src\PIC32MZ2025DAR176</sourceRootElem>
+                <sourceRootElem>..\src\system_config\PIC32MZ2025DAR176</sourceRootElem>
+                <sourceRootElem>../src/Device</sourceRootElem>
+                <sourceRootElem>../src/HeaterCtrl</sourceRootElem>
+                <sourceRootElem>../src/FlowCtrl</sourceRootElem>
+                <sourceRootElem>../src/Utilities</sourceRootElem>
+                <sourceRootElem>../src/Gui</sourceRootElem>
+                <sourceRootElem>../src/Alarm</sourceRootElem>
+                <sourceRootElem>../src/PatientData</sourceRootElem>
+                <sourceRootElem>../src/System</sourceRootElem>
+                <sourceRootElem>../../../../../DSP Library</sourceRootElem>
+                <sourceRootElem>C:/microchip/harmony/v2_06/apps/Project/jFlowMini_App_VelocityType_PID_NewArch_old/firmware/src/Gui</sourceRootElem>
+                <sourceRootElem>../../../../../framework/gfx/libaria/inc</sourceRootElem>
+                <sourceRootElem>../../../../../framework/gfx/libaria/src</sourceRootElem>
+            </sourceRootList>
+            <confList>
+                <confElem>
+                    <name>default</name>
+                    <type>2</type>
+                </confElem>
+                <confElem>
+                    <name>PIC32MZ2025DAR176</name>
+                    <type>2</type>
+                </confElem>
+            </confList>
+            <formatting>
+                <project-formatting-style>false</project-formatting-style>
+            </formatting>
+        </data>
+    </configuration>
+</project>

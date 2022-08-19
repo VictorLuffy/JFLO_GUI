@@ -1,0 +1,410 @@
+/* ************************************************************************** */
+/** @file [SDP31_O2FlowSensor.c]
+ *  @brief {support interface to communicate with SDP31 O2 Flow Sensor such as: 
+ * configure, get flow value, get scale factor, report error if occur
+ * during communication}
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+
+
+/* This section lists the other files that are included in this file.
+ */
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <float.h>
+#include <math.h>
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "driver/i2c/drv_i2c.h"
+#include "I2C_1.h"
+#include "SDP31_O2FlowSensor.h"
+#include "AlarmInterface.h"
+#include "ApplicationDefinition.h"
+
+
+/** @brief I2C slave address of the O2 flow sensor */
+#define O2_FLOW_SENSOR_BASE_ADDR            (0x23)
+
+/** @brief I2C address while writing data to O2 flow sensor
+ * write address = base address << 1 + write bit (0))
+ */
+#define O2_FLOW_SENSOR_WRITE_ADDR           (O2_FLOW_SENSOR_BASE_ADDR << 1)
+
+/** @brief I2C address while reading data from O2 flow sensor
+ * read address = base address << 1 + read bit(1))
+ */
+#define O2_FLOW_SENSOR_READ_ADDR            ((O2_FLOW_SENSOR_BASE_ADDR << 1) + 1)
+
+/** @brief max time wait for flow sensor communication (in MS) via I2C */
+#define O2_FLOWSENSOR_COMM_MAX_WAIT_MS      (4 / portTICK_PERIOD_MS)
+
+/** @brief max time wait for MUTEX to access protection resource */
+#define O2_FLOWSENSOR_MUTEX_MAX_WAIT_MS     (2 / portTICK_PERIOD_MS)
+
+
+
+#define O2_FLOWRATE_COEFICIENT             (4.37)
+
+#define O2_FLOWRATE_OFFSET                 (0)
+
+
+/** @brief scale factor for O2 Flow to convert raw data to physical data*/
+static uint16_t s_O2FlowSensorScaleFactor = 0;
+
+/** @brief latest O2 flow value obtained from O2 Flow sensor*/
+static float s_O2lastFlow = 0;
+
+/** @brief Flag indicate O2 Flow Sensor has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_O2FlowSensorError = eDeviceNoError;
+
+
+/** @brief command to configure o2 flow sensor: configure at continue mode, 
+ * average til read*/
+const uint8_t o2FlowConfigureCmd[] = {0x36, /*0x03*/0x08};
+
+
+/** @brief internal functions declaration */
+static void O2FlowSensor_ReportError();
+static bool O2FlowSensor_GetFlowData(int16_t* rawFlow);
+static bool O2FlowSensor_GetFullData(int16_t* rawFlow, int16_t* rawTemp, uint16_t* scaleFactor);
+static bool O2FlowSensor_Configure();
+static bool O2FlowSensor_ReadScaleFactor();
+
+
+
+/** @brief Initialize SDP31 sensor measure for O2 source by configure its operation 
+ * mode and read all scale factor prepare before operation
+ * This function should be called after RTOS is started and call 1 time only after
+ * start up system
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void O2FlowSensor_Initialize() {
+    //configure operation mode
+    if (O2FlowSensor_Configure() == false) {
+        O2FlowSensor_ReportError();
+    }
+    //Read sensor scale factor
+    if (O2FlowSensor_ReadScaleFactor() == false) {
+        O2FlowSensor_ReportError();
+    }
+    //reset variables
+    //s_O2FlowSensorError = eDeviceNoError;
+}
+
+
+/** @brief reset O2 flow sensor by putting reset pin to LOW in 2 MS
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void O2FlowSensor_Reset() {
+    //reset variables
+    s_O2lastFlow = 0;
+    s_O2FlowSensorError = eDeviceNoError;
+}
+
+/** @brief get current flow from the SDP31 O2 Flow Sensor. Since the sensor is
+ * configured as "Average til Read",the read value is the average value of all samples
+ * from the last read.
+ * The raw value, after reading via I2C, is divided by Scale factor. 
+ * This function should be called after the sensor is already started operation and
+ * the Scale factor is obtained.
+ *  @param [in]  None
+ *  @param [out]  float* flowVal    pointer to store flow value after divide by scale factor (LPM)
+ *  @return None
+ *  @retval true    getting flow value OK
+ *  @retval false   getting flow value Failed
+ */
+bool O2FlowSensor_GetFlow(float* flowVal) {
+    //check whether sensor error
+    if ((s_O2FlowSensorError != eDeviceNoError) || (s_O2FlowSensorScaleFactor == 0))
+    {
+        O2FlowSensor_ReportError();
+        return false;
+    }
+
+    //get data from sensor
+    int16_t rawFlow = 0;
+    if (O2FlowSensor_GetFlowData(&rawFlow) == false) {
+        O2FlowSensor_ReportError();
+        return false;
+    }
+
+    //calculate flow value
+    float flow = (float) rawFlow / (float) s_O2FlowSensorScaleFactor;
+
+    flow = fabsf(flow);
+    flow = sqrtf(flow) * O2_FLOWRATE_COEFICIENT + O2_FLOWRATE_OFFSET;
+    flow = 0; // For test with no o2 source
+
+    //update value here
+    s_O2lastFlow = flow;
+    
+    //output value
+    *flowVal = flow;
+
+    return true;
+}
+
+/** @brief Get last flow value. This function return previous value obtain from
+ * O2 flow sensor (after by passed a LPF filter) without I2C communication.
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return float flow in (LPM)
+ */
+float O2FlowSensor_GetLastFlow() {
+    return s_O2lastFlow;
+}
+
+/** @brief send command via I2C1 to configure SDP31 as continuous measurement.
+ * Before sending, make sure the I2C1 bus is not busy
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ *  @retval true start SDP31 O2 flow sensor OK
+ *  @retval false start SDP31 O2 flow sensor Failed
+ */
+bool O2FlowSensor_Configure () {
+    int i;
+    bool result;
+    //transmit data and check result
+    for (i = 0; i < 10; i++) {      //max try 10 times
+        result = I2C1_Write(O2_FLOW_SENSOR_WRITE_ADDR, (void*) &o2FlowConfigureCmd[0], 
+                sizeof (o2FlowConfigureCmd), O2_FLOWSENSOR_COMM_MAX_WAIT_MS);
+        if (result == true) {
+            break;
+        }
+        /*if sensor is not ready, it may be sensor need time from power supply to start
+        should wait and try again here*/
+        vTaskDelay(5);
+    }
+    
+    if (result == false) {
+        //set error flag
+        s_O2FlowSensorError = eDeviceErrorDetected;
+        return false;
+    }
+    else {
+        //clear error 
+        s_O2FlowSensorError = eDeviceNoError;
+        return true;
+    }
+}
+
+/** @brief Read Scale factor of the SDP31 O2 Flow Sensor. The Scale factor is
+ * used to convert raw flow data to physical flow in LPM 
+ * Scale factor must be get before reading flow. This function should be called
+ * 1 time after send command to start operation for the sensor
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return None
+ *  @retval true get scale factor OK
+ *  @retval false get scale factor Failed
+ */
+bool O2FlowSensor_ReadScaleFactor() {
+    int i;
+    bool result;
+    //transmit data and check result
+    for (i = 0; i < 10; i++) {      //max try 10 times
+        //get all data from sensor
+        result = O2FlowSensor_GetFullData(NULL, NULL, &s_O2FlowSensorScaleFactor);
+        if (result == true) {
+            break;
+        }
+        //if sensor is not ready, it may be sensor need time from power supply to start
+        //should wait and try again here
+        vTaskDelay(5);
+    }
+    
+    if (result == false) {
+        //set error flag
+        s_O2FlowSensorError = eDeviceErrorDetected;
+        return false;
+    }
+    else {
+        //clear error 
+        s_O2FlowSensorError = eDeviceNoError;
+        return true;
+    }
+}
+
+/** @brief Read flow data (3 bytes) from SDP31 O2 Flow Sensor via I2C1, 
+ * then store it to external buffer. A semaphore is used to synchronize when 
+ * I2C transfer has completed. 
+ * Make sure the O2 Flow Sensor already started before execute this function
+ *  @param [in]  None
+ *  @param [out]  int16_t* rawFlow: external buffer to store raw flow value
+ *  @return None
+ *  @retval true getting Flow value OK
+ *  @retval false getting Flow value Failed
+ */
+bool O2FlowSensor_GetFlowData(int16_t* rawFlow) {
+#define O2_FLOW_BYTE_NUM   (3)
+//    uint8_t tempBuffer[O2_FLOW_BYTE_NUM] = {0};
+//
+//    int i;
+//    bool result;
+//    //transmit data and check result
+//    for (i = 0; i < 5; i++) {      //max try 5 times
+//        result = I2C1_Read(O2_FLOW_SENSOR_READ_ADDR, (void*) &tempBuffer[0], 
+//                O2_FLOW_BYTE_NUM, O2_FLOWSENSOR_COMM_MAX_WAIT_MS);
+//        if (result == true) {
+//            //check CRC
+//            if (crcFlowSensor_Check(tempBuffer, 2, tempBuffer[2])) {
+//                //calculate flow and output it
+//                *rawFlow = (int16_t) ((tempBuffer[0] << 8) + tempBuffer[1]);
+//                //clear error 
+//                s_O2FlowSensorError = eDeviceNoError;
+//                //return as good
+//                break;
+//            }
+//            else {
+//                result = false;
+//            }
+//        }
+//        //if reading failed, try gain 
+//        vTaskDelay(1);
+//    }
+    static uint8_t s_errorCount = 0;
+    uint8_t tempBuffer[O2_FLOW_BYTE_NUM] = {0};
+
+    bool result = I2C1_Read(O2_FLOW_SENSOR_READ_ADDR, (void*) &tempBuffer[0], 
+                            O2_FLOW_BYTE_NUM, O2_FLOWSENSOR_COMM_MAX_WAIT_MS);
+    if (result == true) 
+    {
+        //check CRC
+        if (crcFlowSensor_Check(tempBuffer, 2, tempBuffer[2])) 
+        {
+            //calculate flow and output it
+            *rawFlow = (int16_t) ((tempBuffer[0] << 8) + tempBuffer[1]);
+            //clear error 
+            s_O2FlowSensorError = eDeviceNoError;
+            //clear err counter
+            s_errorCount = 0;
+        }
+        else 
+        {
+           // result = false;
+            s_errorCount++; SYS_PRINT ("O2 sensor CRC Fail\n");
+        }
+    }
+    else{
+        s_errorCount++;
+        SYS_PRINT ("O2 sensor err\n");
+        result = true;
+    }
+    
+    if(s_errorCount >= 5){
+        result = false;
+    }
+    
+    //check result
+    if (result == false) {
+        //set error flag
+        s_O2FlowSensorError = eDeviceErrorDetected;
+        return false;
+    }
+    else {
+        //clear error 
+        s_O2FlowSensorError = eDeviceNoError;
+        return true;
+    }
+}
+
+/** @brief Read full data (9 bytes) from SDP31 O2 Flow Sensor via I2C1, includes 
+ * 3 bytes Flow, 3 bytes Temperature and 3 bytes Scale factor, then store it to 
+ * external buffer. A semaphore is used to synchronize when I2C transfer has completed. 
+ * Make sure the O2 Flow Sensor already started before execute this function
+ *  @param [in]  None
+ *  @param [out]    int16_t* rawFlow: external buffer pointer to store raw flow value
+ *                  int16_t* rawTemp: external buffer pointer to store raw temperature value
+ *                  uint16_t* scaleFactor: external buffer pointer to store raw Scale Factor value
+ *  @return None
+ *  @retval true getting these data OK
+ *  @retval false getting these data Failed
+ */
+bool O2FlowSensor_GetFullData(int16_t* rawFlow, int16_t* rawTemp, uint16_t* scaleFactor) {
+#define O2_FULL_DATA_BYTE_NUM                   (9)
+    uint8_t tempBuffer[O2_FULL_DATA_BYTE_NUM] = {0};
+
+    //execute I2C transfer, then check result
+    if (I2C1_Read(O2_FLOW_SENSOR_READ_ADDR, (void*) &tempBuffer[0], O2_FULL_DATA_BYTE_NUM, O2_FLOWSENSOR_COMM_MAX_WAIT_MS) == false) {
+        //set error flag
+        s_O2FlowSensorError = eDeviceErrorDetected;
+        return false;
+    }
+
+    //check CRC for raw flow
+    if (crcFlowSensor_Check(&tempBuffer[0], 2, tempBuffer[2])
+            && crcFlowSensor_Check(&tempBuffer[3], 2, tempBuffer[5])
+            && crcFlowSensor_Check(&tempBuffer[6], 2, tempBuffer[8])) {
+        //output value for flow
+        if (rawFlow != NULL)
+            *rawFlow = (tempBuffer[0] << 8) + tempBuffer[1];
+        //output value for temperature
+        if (rawTemp != NULL)
+            *rawTemp = (tempBuffer[3] << 8) + tempBuffer[4];
+        //output value for scale factor
+        if (scaleFactor != NULL)
+            *scaleFactor = (tempBuffer[6] << 8) + tempBuffer[7];
+        //clear error 
+        s_O2FlowSensorError = eDeviceNoError;
+        //return as good
+        return true;
+    } 
+    else {
+        //set error flag
+        s_O2FlowSensorError = eDeviceErrorDetected;
+        return false;
+    }
+}
+
+/** @brief report error if occur during communication with SDP31 O2 Flow Sensor. 
+ * An error detected may be sent via an event to Alarm task
+ *  @param [in]  None 
+ *  @param [out]  None
+ *  @return None
+ */
+void O2FlowSensor_ReportError() {
+        //check whether an error is detected, then send event to ALarm task
+    if (s_O2FlowSensorError == eDeviceErrorDetected) {
+        SYS_PRINT("\n O2FlowSensor_ReportError\n");
+        //send event to alarm task
+        //alarmInterface_SendEvent(eO2FlowSensorErrorAlarm, eActive, 0);
+        //change state
+        s_O2FlowSensorError = eDeviceErrorReported;
+    }
+}
+
+/** @brief Query any error happen with O2 Flow Sensor
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @retval true O2 Flow sensor has error
+ *  @retval false O2 Flow sensor is OK
+ */
+bool O2FlowSensor_IsSensorFailed() {
+    if (s_O2FlowSensorError == eDeviceNoError) {
+        return false;       //sensor OK
+    }
+    else {
+        return true;        //sensor ERROR
+    }
+}
+
+
+/* *****************************************************************************
+ End of File
+ */

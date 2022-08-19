@@ -1,0 +1,85 @@
+/* ************************************************************************** */
+/** @file [PWM_LCDBacklight.h]
+ *  @brief {Generate PWM to adjust the LCD back-light brightness. 
+ * LCD back-light require PWM has frequency 1 Khz, duty cycle from 10% (darkest)
+ * to 100% (brightest)
+ * The LCD Back-light PWM channel use OC6 combine with Timer3 to generate PWM
+ * All settings and configurations on this file relate tightly with the MPLAB HARMONY configuration.
+ * Change the configuration of the HARMONY may lead these function failed}
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+#ifndef _PWM_LCDBACKLIGHT_H    /* Guard against multiple inclusion */
+#define _PWM_LCDBACKLIGHT_H
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <stdint.h>
+#include <stdbool.h>
+
+
+/* Provide C++ Compatibility */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+    /** @brief Function to initialize PWM_LCDBACKLIGHT to control LCD back-light 
+     * brightness, includes setting the PWM_LCDBACKLIGHT duty cycle 100% but not start yet
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void PWM_LCDBacklight_Initialize();
+
+    /** @brief Function to start output PWM to PWM_LCDBACKLIGHT PIN.
+     * Before calling this function, make sure the function PWM_LCDBacklight_Initialize() 
+     * had been called
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void PWM_LCDBacklight_Start();
+
+    /** @brief Function to set duty cycle of the PWM LCDBACKLIGHT while keeping the
+     * frequency at 1 KHz. Duty cycle can be from 10% to 100%
+     * Before calling this function, make sure the function PWM_LCDBacklight_Initialize() 
+     * had been called
+     *  @param [in]  uint16_t percentage: expected duty cycle (from 10 to 100)
+     *  @param [out]  None
+     *  @return None
+     */
+    void PWM_LCDBacklight_SetDutyCycle(uint16_t percentage);
+
+    void PWM_LCDBacklight_HandleBrightness();
+    
+    
+    /** @brief Query any error happen with Illumination sensor 
+    *  @param [in]  None   
+    *  @param [out] None
+    *  @return None
+    *  @retval true Illumination sensor has error
+    *  @retval false Illumination sensor is OK
+    */
+   bool PWM_LCDBacklight_IsSensorFailed();
+   
+    /** @brief Enable Back light
+    *  @param [in]  None   
+    *  @param [out] None
+    *  @return None
+    */
+    void PWM_LCDBacklight_Enable();
+
+    /* Provide C++ Compatibility */
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _PWM_LCDBACKLIGHT_H */
+
+/* *****************************************************************************
+ End of File
+ */

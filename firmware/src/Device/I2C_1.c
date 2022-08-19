@@ -1,0 +1,457 @@
+/* ************************************************************************** */
+/** @file [I2C_1.c]
+ *  @brief {control read/write data via I2C1, manage share resource between multiple 
+ * peripherals, and notify when complete a transaction}
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <float.h>
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "driver/i2c/drv_i2c.h"
+
+#include "I2C_1.h"
+#include "AlarmInterface.h"
+#include "ApplicationDefinition.h"
+
+/** @brief clock cycles for recovery */
+#define I2C_RECOVER_NUM_CLOCKS      10U
+/** @brief clock frequency for recovery */
+#define I2C_RECOVER_CLOCK_FREQ      50000U
+/** @brief delay to create clock for recovery */
+#define I2C_RECOVER_CLOCK_DELAY_US  (1000000U / (2U * I2C_RECOVER_CLOCK_FREQ))
+
+/** @brief I2C index use for Air flow sensor map with Harmony configuration */
+#define I2C_1_INDEX                 0          
+
+/** @brief I2C flow sensor handle */
+static DRV_HANDLE s_I2C1Handle = DRV_HANDLE_INVALID;
+
+/** @brief I2C flow sensor buffer handle*/
+static DRV_I2C_BUFFER_HANDLE s_I2C1BufferHandle;
+
+/** @brief I2C buffer communication status*/
+static DRV_I2C_BUFFER_EVENT s_I2C1CommStatus;
+
+/** @brief task notification flag, used for synchronization communication when a 
+ * I2C transaction completed*/
+static TaskHandle_t s_I2C1NotityFlag = NULL;
+
+/** @brief mutex to protect I2C 1 sharing */
+//static SemaphoreHandle_t s_I2C1Mutex = NULL;
+
+/** @brief Flag indicate I2C1 has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_I2C1Error = eDeviceNoError;
+
+static uint8_t s_I2C1RecoverCounter = 0;
+
+/** @brief internal functions declaration */
+static void I2C1_ReportError();
+static bool I2C1_WaitTilDone(uint32_t maxTimeWait);
+static bool I2C1_Receive(uint16_t address, void *readBuffer, size_t size);
+static bool I2C1_Transmit(uint16_t address, void *writeBuffer, size_t size);
+static void I2C1_ResetComunicate();
+static inline void I2C1_StatusCallback(DRV_I2C_BUFFER_EVENT event,
+        DRV_I2C_BUFFER_HANDLE bufferHandle,
+        uintptr_t context);
+
+static uint32_t ReadCoreTimer()
+{
+    volatile uint32_t timer;
+
+    // get the count reg
+    asm volatile("mfc0   %0, $9" : "=r"(timer));
+
+    return(timer);
+}
+#define GetSystemClock() (SYS_CLK_FREQ)
+#define us_SCALE   (GetSystemClock()/2000000)
+static void DelayUs(unsigned long int usDelay )
+{
+      register unsigned int startCnt = ReadCoreTimer();
+      register unsigned int waitCnt = usDelay * us_SCALE;
+ 
+      while( ReadCoreTimer() - startCnt < waitCnt );
+}
+
+bool I2C1_CheckTransferStatus(DRV_I2C_BUFFER_HANDLE drvBufferHandle)
+{
+    if (DRV_I2C_BUFFER_EVENT_COMPLETE == DRV_I2C_TransferStatusGet(s_I2C1Handle, drvBufferHandle))
+    {
+        return true; //ok
+    }
+    else
+    {
+        return false; //fail
+    }
+}
+
+/** @brief Function to initialize I2C1, used to communicate with multiple devices\
+ * such as: BME280, ADXL345, and Audio Codec. including open I2C port, setting 
+ * callback function, initializing memories before operation
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void I2C1_Initialize() {
+//        I2C1_ResetComunicate();
+    if (s_I2C1Handle == DRV_HANDLE_INVALID) {
+        s_I2C1Handle = DRV_I2C_Open(I2C_1_INDEX, DRV_IO_INTENT_EXCLUSIVE);
+        /* event-handler set up receive callback from DRV_I2C_Tasks */
+        DRV_I2C_BufferEventHandlerSet(s_I2C1Handle, I2C1_StatusCallback, s_I2C1CommStatus);
+    }
+    
+    //create Mutex
+    //s_I2C1Mutex = xSemaphoreCreateMutex();
+    //xSemaphoreGive(s_I2C1Mutex);
+    
+    //reset variables
+    s_I2C1Error = eDeviceNoError;
+}
+
+/** @brief This function reset I2C communicate by Flushing Queue
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+*/
+static void I2C1_ResetComunicate() 
+{
+    SYS_PRINT("\nI2C1 error >>> Reset I2C1\n");
+ 
+//    SYS_PRINT("I2C1STATbits.BCL = %d\n", I2C1STATbits.BCL);
+//    SYS_PRINT("I2C1STATbits.I2COV = %d\n", I2C1STATbits.I2COV);
+    
+    I2C1STATbits.IWCOL = 0;
+    I2C1STATbits.BCL = 0;
+    I2C1STATbits.I2COV = 0;
+    
+    I2C1CONbits.I2CEN = 0;
+    TRISA = SYS_PORT_A_TRIS & 0xFEFF;
+    
+    //SCL as output
+    TRISAbits.TRISA14 = 0;
+    //SDA as input
+    TRISAbits.TRISA15 = 1;
+    int i;
+    do
+    {
+        for ( i = 0U; i < I2C_RECOVER_NUM_CLOCKS; ++i)
+        {
+            DelayUs (I2C_RECOVER_CLOCK_DELAY_US);
+            LATAbits.LATA14 = 1;
+            DelayUs (I2C_RECOVER_CLOCK_DELAY_US);
+            LATAbits.LATA14 = 0;
+        }
+        s_I2C1RecoverCounter++;
+        if (s_I2C1RecoverCounter > 3)
+        {
+            break;
+        }
+    }while(!PORTAbits.RA15);
+    
+    s_I2C1RecoverCounter = 0;
+    I2C1CONbits.I2CEN = 1;
+    I2C1_Initialize();
+    DRV_I2C_QueueFlush(s_I2C1Handle);
+}
+
+
+/** @brief write a packet data via I2C1, then wait for it done
+ *  @param [in]  uint16_t address: I2C Address need to communicate  
+ *              void *writeBuffer: pointer to data packet
+ *              size_t size: size of data packet 
+ *              uint32_t maxWait: maximum time (in ms) wait for read done. If over
+ * time, return error
+ *  @param [out]  None
+ *  @return None
+ *  @retval true write data success
+ *  @retval false write data failed
+ */
+bool I2C1_Write(uint16_t address, void *writeBuffer, size_t size, uint32_t maxWait) 
+{
+    //check error
+    //    if (s_I2C1Error != eDeviceNoError) {
+    //        //report error
+    //        I2C1_ReportError();
+    //        return false;
+    //    }
+    
+  
+    //take resource 
+//    if (xSemaphoreTake(s_I2C1Mutex, maxWait) == pdFALSE) {
+//        //report error
+//        SYS_PRINT("\n 1111");
+//        I2C1_ReportError();
+//        return false;
+//    }
+
+
+    
+    //uint8_t addr = (uint8_t)address;
+    s_I2C1BufferHandle = DRV_I2C_Transmit(s_I2C1Handle, address,(void*)  writeBuffer, size, NULL);
+    uint8_t timeout = 0;
+    if (s_I2C1BufferHandle == DRV_I2C_BUFFER_HANDLE_INVALID) {
+
+        //xSemaphoreGive(s_I2C1Mutex);
+        I2C1_ResetComunicate();
+        return false; //error
+    } 
+    else {
+        //vTaskDelay(1);//2
+        DelayUs(100);
+        while (!I2C1_CheckTransferStatus(s_I2C1BufferHandle))
+        {
+            vTaskDelay(1);
+            timeout++;
+            if(timeout >= maxWait){
+                //xSemaphoreGive(s_I2C1Mutex);
+                return false;
+            }
+        }
+        //SYS_PRINT("timeout_%d\n", timeout);
+        //return true;
+    }  
+
+    //xSemaphoreGive(s_I2C1Mutex);
+    
+    return true;
+}
+
+/** @brief read data via I2C1 and wait for it done
+ *  @param [in]  uint16_t address: I2C Address need to read data  
+ *              size_t size: size of data expect to read 
+ *              uint32_t maxWait: maximum time (in ms) wait for read done. If over
+ * time, return error
+ *  @param [out]  void *readBuffer: pointer to store buffer
+ *  @return None
+ *  @retval true read data success
+ *  @retval false read data failed
+ */
+bool I2C1_Read(uint16_t address, void *readBuffer, size_t size, uint32_t maxWait) 
+{
+    //check error
+//    if (s_I2C1Error != eDeviceNoError) {
+//        //report error
+//        I2C1_ReportError();
+//        return false;
+//    }
+    
+    //TickType_t startTime = xTaskGetTickCount();
+    //take resource 
+//    if (xSemaphoreTake(s_I2C1Mutex, maxWait) == pdFALSE) {
+//        //report error
+//        SYS_PRINT("\n 444");
+//        I2C1_ReportError();
+//        return false;
+//    }
+    
+    
+    s_I2C1BufferHandle = DRV_I2C_Receive(s_I2C1Handle, address,(void*)  readBuffer, size, NULL);
+    uint8_t timeout = 0;
+    if (s_I2C1BufferHandle == DRV_I2C_BUFFER_HANDLE_INVALID) {
+
+        //xSemaphoreGive(s_I2C1Mutex);
+        I2C1_ResetComunicate();
+        return false; //error
+    } 
+    else {
+        //vTaskDelay(1);//2
+        DelayUs(300);
+        while (!I2C1_CheckTransferStatus(s_I2C1BufferHandle))
+        {
+            vTaskDelay(1);
+            timeout++;
+            if(timeout >= maxWait){
+                //xSemaphoreGive(s_I2C1Mutex);
+                return false;
+            }
+        }
+        //SYS_PRINT("timeoutRd_%d\n", timeout);
+        //return true;
+    } 
+     
+     
+    //xSemaphoreGive(s_I2C1Mutex);
+    
+    return true;
+}
+
+/** @brief transmit a packet data via I2C1, includes checking port to make sure
+ * it is ready to send new packet data
+ *  @param [in]  uint16_t address: I2C Address need to communicate  
+ *              void *writeBuffer: pointer to data packet
+ *              size_t size: size of data packet 
+ *  @param [out]  None
+ *  @return None
+ *  @retval true transmit data success
+ *  @retval false transmit data failed
+ */
+bool I2C1_Transmit(uint16_t address,
+        void *writeBuffer,
+        size_t size) {
+
+    //transmit data
+    s_I2C1BufferHandle = DRV_I2C_Transmit(s_I2C1Handle,
+            address,
+            (void*) writeBuffer,
+            size,
+            NULL);
+
+    //check result
+    if (s_I2C1BufferHandle == DRV_I2C_BUFFER_HANDLE_INVALID) {
+        //set error flag
+        s_I2C1Error = eDeviceErrorDetected;
+        return false; //error
+    } 
+    else {
+        /* Store the handle of the calling task. */
+        s_I2C1NotityFlag = xTaskGetCurrentTaskHandle();
+        //clear error 
+        s_I2C1Error = eDeviceNoError;
+        return true; //success
+    }
+}
+
+/** @brief receive data via I2C1, includes checking port to make sure
+ * it is ready before sending address to get data
+ *  @param [in]  uint16_t address: I2C Address need to read data  
+ *              size_t size: size of data expect to read 
+ *  @param [out]  void *readBuffer: pointer to store buffer
+ *  @return None
+ *  @retval true receive data success
+ *  @retval false receive data failed
+ */
+bool I2C1_Receive(uint16_t address, void *readBuffer, size_t size) 
+{
+    //get data
+    s_I2C1BufferHandle = DRV_I2C_Receive(s_I2C1Handle,
+            address,
+            (void*) readBuffer,
+            size,
+            NULL
+            );
+
+    //check result
+    if (s_I2C1BufferHandle == DRV_I2C_BUFFER_HANDLE_INVALID) {
+        //set error flag
+        s_I2C1Error = eDeviceErrorDetected;
+        return false;
+    } 
+    else {
+        //Store the handle of the calling task
+        s_I2C1NotityFlag = xTaskGetCurrentTaskHandle();
+        //clear error 
+        s_I2C1Error = eDeviceNoError;
+        return true;
+    }
+}
+
+/** @brief wait for current communication on I2C1 done by just waiting a semaphore.
+ * When start a communication, the semaphore is taken. when communication is done,
+ * the semaphore is given by callback function 
+ *  @param [in]  None 
+ *  @param [out]  None
+ *  @return None
+ *  @retval true the communication is done before maximum waiting time --> OK
+ *  @retval false over maximum time but the communication is not done yet --> ERROR
+ */
+bool I2C1_WaitTilDone(uint32_t maxTimeWait) {
+    uint32_t ulNotificationValue;
+    const TickType_t xMaxBlockTime = pdMS_TO_TICKS(maxTimeWait);
+    /* Wait to be notified that the transmission is complete.  Note the first
+    parameter is pdTRUE, which has the effect of clearing the task's notification
+    value back to 0, making the notification value act like a binary (rather than
+    a counting) semaphore.  */
+    ulNotificationValue = ulTaskNotifyTake(pdTRUE,
+            xMaxBlockTime);
+
+    if (ulNotificationValue == 1) {
+        /* The transmission ended as expected. */
+        //clear error 
+        s_I2C1Error = eDeviceNoError;
+        return true;
+    } else {
+        /* The call to ulTaskNotifyTake() timed out. */
+        //set error flag
+        s_I2C1Error = eDeviceErrorDetected;
+        return false;
+    }
+}
+
+/** @brief Callback from DRV_I2C_Tasks when I2C1 has completed a
+ * transaction. This function may call in ISR, should not put any debug here
+ *  @param [in]  DRV_I2C_BUFFER_EVENT event: status of the transaction (complete, failed, ...)
+ *  @param [out]  None
+ *  @return None
+ */
+inline void I2C1_StatusCallback(DRV_I2C_BUFFER_EVENT event,
+        DRV_I2C_BUFFER_HANDLE bufferHandle,
+        uintptr_t context) 
+{
+//    signed portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
+//
+//    //enter critical code
+//    UBaseType_t uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
+
+    switch (event) {
+        case DRV_I2C_BUFFER_EVENT_COMPLETE:
+            break;
+        case DRV_I2C_BUFFER_EVENT_ERROR:
+            //I2C1_ReportError();
+            break;
+        default:
+            break;
+    }
+//    /* Notify the task that the transmission is complete. */
+//    vTaskNotifyGiveFromISR(s_I2C1NotityFlag, &xHigherPriorityTaskWoken);
+//
+//    /* There are no transmissions in progress, so no tasks to notify. */
+//    s_I2C1NotityFlag = NULL;
+//
+//    //exit critical code
+//    taskEXIT_CRITICAL_FROM_ISR(uxSavedInterruptStatus);
+}
+
+/** @brief report error if occur during communication via I2C1, may be send event
+ * to Alarm task
+ *  @param [in]  None 
+ *  @param [out]  None
+ *  @return None
+ */
+void I2C1_ReportError() {
+    //check whether an error is detected, then send event to ALarm task
+    if (s_I2C1Error == eDeviceErrorDetected) {
+        //send event to alarm task
+        alarmInterface_SendEvent(eI2C1ErrorAlarm, eActive, eHighPriority, 0);
+        SYS_PRINT("\n error at: I2C1_ReportError");
+        //change state
+        s_I2C1Error = eDeviceErrorReported;
+    }
+}
+
+
+
+
+
+/* *****************************************************************************
+ End of File
+ */

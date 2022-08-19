@@ -1,0 +1,266 @@
+/** @file SettingScreen_DateTimeSetting.h
+ *  @brief The interfaces for display date time setting
+ *  @author Trac Truong
+ */
+
+#ifndef SETTINGSCREEN_DATETIMESETTING_H
+#define	SETTINGSCREEN_DATETIMESETTING_H
+
+/* This section lists the other files that are included in this file.
+ */
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "gfx/hal/inc/gfx_context.h"
+#include "Gui/DisplayControl.h"
+#include "Gui/GuiInterface.h"
+#include "Gui/LogMgr.h"
+
+
+typedef void(*VOID_FUNC)(void);
+
+typedef enum {
+    eDefaultDateTimeSetting, /**< no date time item select */
+    eHourDateTimeSetting,/**< hour setting*/
+    eMinuteDateTimeSetting,/**< minute setting*/
+    eSecondDateTimeSetting,/**< second setting*/
+    eDateDateTimeSetting,/**< date setting*/
+    eMonthDateTimeSetting,/**< month setting*/       
+    eYearDateTimeSetting,/**< year setting*/  
+    eNoOfDateTimeSetting, /**< number of date time setting*/  
+}E_DateTimeSetting;
+
+typedef struct {
+	laWidget* widget;	
+	VOID_FUNC incFunc;
+	VOID_FUNC decFunc;
+
+} DateTimeSetting_Control_Struct;
+
+typedef struct {
+	uint8_t year; /**< year 0-99 */
+    uint8_t month; /**< month */
+    uint8_t date; /**< date */
+    uint8_t hour; /**< hour */
+    uint8_t minute; /**< minute */
+    uint8_t second; /**< second */
+} DateTimeSetting_Data_Struct;
+
+
+/** @brief SettingScreen_DateTimeSetting_Init
+ *      This init data when open the datetime setting
+ *  @param [in] E_DateTimeSetting s
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_Init();
+
+/** @brief SettingScreen_DateTimeSetting_Display
+ *      This control for display date time display
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_Display();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This control for display date time display init at first show
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_IncYear();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This decrease the year
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DecYear();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This increase the month
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_IncMonth();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This decrease the month
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DecMonth();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This increase the date
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_IncDate();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This decrease the date
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DecDate();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This increase the hour
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_IncHour();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This decrease the hour
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DecHour();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This increase the minute
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_IncMinute();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This decrease the minute
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DecMinute();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayInit
+ *      This increase the second
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_IncSecond();
+
+/** @brief SettingScreen_DateTimeSetting_DecSecond
+ *      This decrease the second
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DecSecond();
+
+/** @brief Get the max day in specific month, year
+ *  @param [in] uint8_t month
+ *  @param [in] uint16_t year
+ *  @return uint8_t : the max day
+ */
+uint8_t SettingScreen_DateTimeSetting_GetMaxDay(uint8_t month, uint16_t year);
+
+/** @brief check if the year is leap
+ *  @param [in] uint16_t year
+ *  @return bool : true if the year is leap
+ */
+bool SettingScreen_DateTimeSetting_CheckLeapYear(uint16_t year);
+
+/** @brief check if the month is 31 day
+ *  @param [in] uint8_t month
+ *  @return bool : true if the month is 31 day
+ */
+bool SettingScreen_DateTimeSetting_CheckMonth31(uint8_t month);
+
+/** @brief SettingScreen_DateTimeSetting_SetCallbackFunction
+ *      This set callback function for some event that not auto generated by Harmony
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_SetCallbackFunction(void);
+
+/** @brief SettingScreen_DateTimeSetting_Dec
+ *      This function is use to decrease value for date time item, will be call by press event
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_Dec();
+
+/** @brief SettingScreen_DateTimeSetting_Inc
+ *      This function is use to increase value for date time item, will be call by press event
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_Inc();
+
+/** @brief SettingScreen_DateTimeSetting_SetSetting
+ *  @param [in] E_DateTimeSetting dataTimeSetting
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_SetSetting(E_DateTimeSetting dataTimeSetting);
+
+/** @brief SettingScreen_DateTimeSetting_GetSetting
+ *  @param [in] None
+ *  @param [out] None
+ *  @return E_DateTimeSetting
+ */
+E_DateTimeSetting SettingScreen_DateTimeSetting_GetSetting();
+
+/** @brief SettingScreen_DateTimeSetting_DisplayTime
+ *      This is display the date time
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_DisplayTime();
+
+/** @brief SettingScreen_DateTimeSetting_UpdateDateWhenYearOrMonthChange
+ *      
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_UpdateDateWhenYearOrMonthChange();
+
+/** @brief SettingScreen_DateTimeSetting_CheckDataChange
+ *      This check if this setting is changed
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+bool SettingScreen_DateTimeSetting_CheckDataChange();
+
+/** @brief SettingScreen_DateTimeSetting_SaveSetting
+ *      This save the setting if the setting change
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void SettingScreen_DateTimeSetting_SaveSetting();
+
+/** @brief SettingScreen_DateTimeSetting_DiscardSetting
+ *      This discard the setting change
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+
+void SettingScreen_DateTimeSetting_DiscardSetting();
+
+#endif
+
+/* end of file */

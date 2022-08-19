@@ -1,0 +1,121 @@
+/* ************************************************************************** */
+/** @file [FlowController.c]
+ *  @brief {A PID controller for Flow control. This controller take input from 
+ * Air Flow Sensor & O2 Flow Sensor and control Blower follow the Flow setting }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+/* This section lists the other files that are included in this file.
+ */
+#include "FlowController.h"
+#include "PID.h"
+#include "system_definitions.h"
+
+
+/** @brief The Proportional gain of flow's PID controller */
+const float FLOW_CONTROLLER_PID_KP = 0.5;//1.0;
+
+/** @brief The Integral gain of flow's PID controller */
+const float FLOW_CONTROLLER_PID_KI = 1.0;//2.0;
+
+/** @brief The Derivative gain of flow's PID controller */
+const float FLOW_CONTROLLER_PID_KD = 0.0;
+
+/** @brief Flow's PID controller instance */
+static PIDController s_FlowPidController;
+
+/** @brief current measurement flow, use as input of Flow's PID controller */
+static float s_MeasuredFlow = 0;
+
+
+/** @brief Function return current measurement to supply input for Flow's PID 
+ * controller. This function will automatically called when PID controller run
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return float       current flow measurement
+ */
+static inline float FlowController_PIDDataIn()
+{
+    return s_MeasuredFlow;
+}
+
+/** @brief Function perform action after PID controller has been calculated. In
+ * this case, it will adjust Blower speed. 
+ * This function will be called automatically when PID controller has finished 
+ * calculation 
+ *  @param [in]  float output   the output result after PID controller has calculated   
+ *  @param [out]  None
+ *  @return  None
+ */
+static inline void FlowController_PIDDataOut(float output)
+{
+    //DRV8308_SetPower(output);
+    //PWM negative logic
+    PWM_Motor_setDutyCycle(100.0 - output);
+}
+
+/** @brief Function initialize PID controller for Flow Control and set it up before
+ * running
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @return  None
+ */
+void FlowController_Initialize() {
+    PID_CreateController(&s_FlowPidController, 
+            FLOW_CONTROLLER_PID_KP, 
+            FLOW_CONTROLLER_PID_KI,
+            FLOW_CONTROLLER_PID_KD, 
+            FlowController_PIDDataIn, 
+            FlowController_PIDDataOut);
+    PID_SetOutputBounds(&s_FlowPidController, 5.0, 65.0/*95.0*/);
+    PID_SetInputBounds(&s_FlowPidController, 0.0, 100.0);
+    PID_SetMaxIntegralCumulation(&s_FlowPidController, 100.0);//40.0//14.0
+    PID_SetEnabled(&s_FlowPidController, 0);
+}
+
+/** @brief Function perform PID controller calculation with measurement value obtained
+ * from Air + O2 flow sensor
+ *  @param [in]  float measured     measurement value, in this case: Air + O2 Flow
+ *  @param [out]  None
+ *  @return float       result after PID calculation
+ */
+float FlowController_Operate(float measured, float target) {
+    s_FlowPidController.target = target;
+    s_MeasuredFlow = measured;
+    PID_Calculate(&s_FlowPidController);
+    return s_FlowPidController.output;
+}
+
+/** @brief Function to anable / disable Flow's PID controller
+ *  @param [in]  bool enable     enable = 1/ disable = 0
+ *  @param [out]  None
+ *  @return None
+ */
+void FlowController_Enable(bool enable) {
+    if (enable) {
+        PID_SetEnabled(&s_FlowPidController, 1);
+    }
+    else {
+        PID_SetEnabled(&s_FlowPidController, 0);
+    }
+}
+
+/** @brief Function to set target of Flow's PID controller. In this case, target 
+ * is the Flow setting value
+ *  @param [in]  float target     target to apply to Flow's PID controller
+ *  @param [out]  None
+ *  @return None
+ */
+void FlowController_SetTarget(float target) {
+    s_FlowPidController.target = target;
+}
+
+float FlowController_GetControlValue(void)
+{
+    return s_FlowPidController.output;
+}
+/* *****************************************************************************
+ End of File
+ */

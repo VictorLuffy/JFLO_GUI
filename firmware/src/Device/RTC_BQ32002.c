@@ -1,0 +1,355 @@
+/** @file RTC_BQ32002.c
+ *  @brief {Supply APIs configure and get data from BQ32002 Real-Time Clock 
+ *  @author {nguyen truong}
+ */
+
+
+
+#include "system_definitions.h"
+#include "ApplicationDefinition.h"
+#include "GuiInterface.h"
+#include "I2C_4.h"
+#include "RTC_BQ32002.h"
+
+
+
+
+
+
+///** @brief I2C slave address of the BQ32002 */
+//#define BQ32002_BASE_ADDR       (0x68)//(0x2F)
+/** @brief I2C slave address of the BQ32002 */
+#define BQ32002_BASE_ADDR       (0x6F)//(0x2F)
+
+/** @brief I2C address while writing data to BQ32002
+ * write address = base address << 1 + write bit (0))
+ */
+#define BQ32002_WRITE_ADDR      (BQ32002_BASE_ADDR << 1)
+
+/** @brief I2C address while reading data from BQ32002
+ * read address = base address << 1 + read bit(1))
+ */
+#define BQ32002_READ_ADDR       ((BQ32002_BASE_ADDR << 1) + 1)
+
+/** @brief max time wait for BQ32002 communication (in ms) via I2C*/
+#define BQ32002_MAX_WAIT_MS     (10)
+
+
+
+/** @brief Define Block time mutex */
+#define BLOCKTIME_RTC 10
+
+
+extern DRV_HANDLE s_I2C4Handle;
+
+/** @brief Flag indicate I2C4 has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_BQ32002Error = eDeviceNoError;
+
+
+
+/** @brief Declare local date time */
+static RTC_TIME_t s_localTime = {0};
+
+
+/** @brief Semaphore to signal synchronization communication for rtc */
+static SemaphoreHandle_t s_rtcMutex = NULL;
+
+
+static bool rtc_SetRegiterValue(uint8_t regAddr, uint8_t value)
+{
+    uint8_t bufferWrite[2] = {};
+    bufferWrite[0] = regAddr;
+    bufferWrite[1] = value;
+    
+    return I2C4_Write(BQ32002_WRITE_ADDR, (void*) bufferWrite, sizeof(bufferWrite), BQ32002_MAX_WAIT_MS);
+}
+
+static bool rtc_ReadRegisterValue(uint8_t regAddr, uint8_t *readValue)
+{
+    uint8_t readByte = 0;
+    if(I2C4_Write(BQ32002_WRITE_ADDR, (void*) &regAddr, 1, BQ32002_MAX_WAIT_MS) == true)
+    {
+        if(I2C4_Read(BQ32002_READ_ADDR, (void*)&readByte, 1, BQ32002_MAX_WAIT_MS)== true)
+        {
+            *readValue = readByte;
+            return true;
+        }
+        else{
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+
+
+/** @brief Initialize rtc
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void rtc_Init(void)
+{
+    SYS_PRINT("rtc_Init \n");
+    //Create Semaphore rtc
+    s_rtcMutex = xSemaphoreCreateMutex();
+    xSemaphoreGive(s_rtcMutex);
+    return;
+}
+
+void rtc_ConfigForTestAccuracy()
+{
+    SYS_PRINT("rtc_ConfigForTestAccuracy \n");
+    uint8_t CFG1 = 0;
+    uint8_t SFR = 0;
+    
+    rtc_SetRegiterValue(0x07, 0xC0);
+    rtc_SetRegiterValue(0x22, 0x00);
+            
+    rtc_ReadRegisterValue(0x07, &CFG1);
+    rtc_ReadRegisterValue(0x22, &SFR);
+    
+    SYS_PRINT("CFG1 = %X, SFR = %X\n", CFG1, SFR);
+}
+/** @brief Report error if occur during communicate with MCP4018
+ *  @param [in]   None
+ *  @param [out]  None
+ *  @return None
+ */
+E_DeviceErrorState rtc_ReportError(void) {
+    //SYS_PRINT("rtc_ReportError \n");
+    //check whether an error is detected, then send event to ALarm task
+    if (s_BQ32002Error == eDeviceErrorDetected) {
+    
+        //send event to alarm task
+        //alarmInterface_SendEvent(eBQ32002ErrorAlarm, eActive, 0);
+        //SYS_PRINT("\n error at: BQ32002_ReportError \n");
+        //change state
+        //s_BQ32002Error = eDeviceErrorReported;
+        return eDeviceErrorDetected;
+    }
+    
+    return eDeviceNoError;
+}
+
+
+/** @brief Set date time
+ *  @param [in] RTC_TIME_t time: date time set
+ *  @param [out] None
+ *  @return None
+ */
+void rtc_SetTime(RTC_TIME_t time)
+{
+    //SYS_PRINT("rtc_SetTime \n");
+    
+    //check valid time
+    if(time.SEC > 59){
+        return;
+    }
+    else if(time.MIN > 59){
+        return;
+    }
+    else if(time.HOUR > 23){
+        return;
+    }
+    else if(time.DATE > 31){
+        return;
+    }
+    else if(time.MONTH > 12){
+        return;
+    }
+    else if(time.YEAR > 99){
+        return;
+    }
+    
+    
+#define SIZE_BUFF  8
+    uint8_t timeBuff[SIZE_BUFF] = {0};
+    uint8_t startAddrReg = 0x00;
+    timeBuff[0] = startAddrReg;
+    timeBuff[1] = ((time.SEC/10) << 4) + (time.SEC%10);timeBuff[1] |= 0x80;
+    timeBuff[2] = ((time.MIN/10) << 4) + (time.MIN%10);
+    timeBuff[3] = ((time.HOUR/10) << 4) + (time.HOUR%10); timeBuff[4] = 0x09;
+    
+    timeBuff[5] = ((time.DATE/10) << 4) + (time.DATE%10);
+    timeBuff[6] = ((time.MONTH/10) << 4) + (time.MONTH%10);
+    timeBuff[7] = ((time.YEAR/10) << 4) + (time.YEAR%10);
+    
+    
+    uint8_t i;
+    bool result;
+    //write command 
+    for (i = 0; i < 3; i++) {      //max try 3 times
+        result = I2C4_Write(BQ32002_WRITE_ADDR, (void*) &timeBuff, sizeof(timeBuff), BQ32002_MAX_WAIT_MS);
+        if (result == true) {//SYS_PRINT("DATE & TIME: %d:%d:%d   %d-%d-20%d\n",s_localTime.HOUR, s_localTime.MIN, s_localTime.SEC, s_localTime.DATE, s_localTime.MONTH, s_localTime.YEAR);
+            s_BQ32002Error = eDeviceNoError;
+            break;
+        }
+        //delay and try again
+        vTaskDelay(2);
+    }
+    
+    if (result == false) {
+        s_BQ32002Error = eDeviceErrorDetected;
+        SYS_PRINT("rtc_SetTime write I2C4 error \n");
+        rtc_ReportError();
+    }
+    
+    
+    return;
+}
+
+/** @brief Read datetime
+ *  @param [in] RTC_TIME_t time: data time set
+ *  @param [out] None
+ *  @return s_localTime: local date time
+ */
+RTC_TIME_t rtc_ReadTime(void)
+{
+//    SYS_PRINT("rtc_ReadTime \n");
+#define SIZE 7
+    static uint16_t s_counterErr = 0;
+    uint8_t timeBuff[SIZE] = {0};
+    uint8_t startAddrReg = 0x00;
+    bool result;
+    //write command 
+
+    result = I2C4_Write(BQ32002_WRITE_ADDR, (void*) &startAddrReg, sizeof(startAddrReg), BQ32002_MAX_WAIT_MS);
+  
+    if(result == true)
+    {
+        result = I2C4_Read(BQ32002_READ_ADDR, (void*) timeBuff, SIZE, BQ32002_MAX_WAIT_MS);
+        s_counterErr = 0;
+        if (result == true)
+        {
+            if (xSemaphoreTake(s_rtcMutex, BLOCKTIME_RTC) == pdTRUE)
+            {
+                s_localTime.SEC = (timeBuff[0] & 0x0F) + ((timeBuff[0]&0x7F) >> 4)*10;
+                s_localTime.MIN = (timeBuff[1] & 0x0F) + ((timeBuff[1]&0x7F) >> 4)*10;
+                s_localTime.HOUR = (timeBuff[2] & 0x0F) + ((timeBuff[2]&0x3F) >> 4)*10;
+
+                s_localTime.DATE = (timeBuff[4] & 0x0F) + ((timeBuff[4]&0x3F) >> 4)*10;
+                s_localTime.MONTH = (timeBuff[5] & 0x0F) + ((timeBuff[5]&0x1F) >> 4)*10;
+                s_localTime.YEAR = (timeBuff[6] & 0x0F) + (timeBuff[6] >> 4)*10;
+                xSemaphoreGive(s_rtcMutex);
+            }
+            s_counterErr = 0;
+        }
+    }
+            
+    if (result == false)
+    {
+        s_counterErr++;
+        if(s_counterErr >= 3)
+        {
+            rtc_ReportError();
+        }
+    }
+
+    
+    //SYS_PRINT("DATE & TIME: %d:%d:%d   %d-%d-20%d\n",s_localTime.HOUR, s_localTime.MIN, s_localTime.SEC, s_localTime.DATE, s_localTime.MONTH, s_localTime.YEAR);
+    return s_localTime;
+}
+
+static void rtc_SetDefaultTime()
+{
+    SYS_PRINT("rtc_SetDefaultTime \n");
+    RTC_TIME_t time;
+    time.YEAR = 22;
+    time.MONTH = 1;
+    time.DAY = 0;
+    time.DATE = 1;
+    time.HOUR = 0;
+    time.MIN = 0;
+    time.SEC = 0;
+    
+    rtc_SetTime(time);
+}
+
+void rtc_CheckValidTime()
+{
+    SYS_PRINT("rtc_CheckValidTime \n");
+    RTC_TIME_t time;
+    bool err = false;
+    time = rtc_ReadTime();
+    if(time.SEC > 59){
+        err = true;
+    }
+    else if(time.MIN > 59){
+        err = true;
+    }
+    else if(time.HOUR > 23){
+        err = true;
+    }
+    else if(time.DATE > 31){
+        err = true;
+    }
+    else if(time.MONTH > 12){
+        err = true;
+    }
+    else if(time.YEAR > 99){
+        err = true;
+    }
+    if(err == true)
+    {
+        rtc_SetDefaultTime();
+    }
+}
+
+/** @brief Get datetime
+ *  @param [in] RTC_TIME_t time: data time set
+ *  @param [out] None
+ *  @return true if get time success
+ */
+bool rtc_GetTime(RTC_TIME_t* time)
+{
+//    SYS_PRINT("rtc_GetTime \n");
+    if (xSemaphoreTake(s_rtcMutex, BLOCKTIME_RTC) == pdTRUE)
+    {
+        *time = s_localTime;
+        xSemaphoreGive(s_rtcMutex);
+        return true;
+    }
+    return false;
+}
+
+
+/** @brief Update and send to GUI
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+//void rtc_CheckAndUpdate(void)
+//{
+//    SYS_PRINT("rtc_CheckAndUpdate \n");
+//    //send event to GUI task
+//    guiInterface_SendEvent(eGuiUpdateRtcId, 0);
+//
+//    //Reset flag update
+//    //s_updateRtc = false;
+//
+//    return;
+//}
+
+
+/** @brief Query any error happen with RTC module
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @retval true RTC module has error
+ *  @retval false RTC module is OK
+ */
+bool rtc_IsModuleFailed() {
+    if (s_BQ32002Error == eDeviceNoError) {
+        return false;
+    }
+    else 
+    {
+        return true;
+    }
+}
+
+/* end of file */

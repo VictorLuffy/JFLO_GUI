@@ -1,0 +1,159 @@
+/* ************************************************************************** */
+/** @file [ADC.h]
+ *  @brief {set up ADC module 7 to scan multiple channels, register channel AN14,
+ * AN16, AN18, AN20, AN21, AN39 to ADC7. 
+ * Set up interrupt for ADC conversion complete and automatically post conversion 
+ * result to ADC queue. 
+ * Support interface to get value of each ADC channel, protect share resource by 
+ * MUTEX }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+
+#ifndef _ADC_H    /* Guard against multiple inclusion */
+#define _ADC_H
+
+
+/* This section lists the other files that are included in this file.
+ */
+#include <stdint.h>
+#include <stdbool.h>
+#include <float.h>
+
+
+/* Provide C++ Compatibility */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+    /** @brief ADC channel connect with current sensor #1 (AN21) */
+#define ADC_CURRENT_SENSOR_1    21
+
+    /** @brief ADC channel connect with current sensor #2 (AN20) */
+#define ADC_CURRENT_SENSOR_2    20
+
+    /** @brief ADC channel connect with light sensor (AN33) */
+#define ADC_LIGHT_SENSOR        33
+
+    /** @brief ADC channel connect with temperature sensor #1 (AN18) */
+//#define ADC_TEMPERATURE_SENSOR_1    18          //chamber air
+
+    /** @brief ADC channel connect with temperature sensor #2 (AN20) */
+//#define ADC_TEMPERATURE_SENSOR_2    20          //canula air
+
+    /** @brief ADC channel connect with temperature sensor #1 (AN14) */
+//#define ADC_TEMPERATURE_SENSOR_3    14          //IH core
+    
+    /** @brief ADC channel connect with IH voltage sensor (AN18) */
+#define ADC_VOLT_IH_SENSOR       18
+    
+        /** @brief ADC channel connect with NIMH battery (AN10) */
+#define ADC_VOLT_NIMH_MONITOR    10
+    
+    /** @brief ADC channel connect with input voltage (AN24) */
+#define ADC_VOLT_INPUT_MONITOR   24
+    
+
+    /** @brief Function to initialize ADC7 module (module scan for multiple channels)
+     * responsible to scan all ADC channels in the project. The ADC module is setting 
+     * up to be triggered by TIMER 5 every 5 ms, automatically interrupt when ADC conversion
+     * is finished. Interrupt ISR function will send and event to s_ADCDataQueue to 
+     * update value for each channel ADC. A MUTEX is also created to protect multiple
+     * task access to ADC channels value.
+     * This function should be called 1 time at start up
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void ADC_Initialize();
+
+    /** @brief start ADC conversion by starting TIMER 5, the timer trigger for ADC 7
+     * module. After each time triggered, all channels registered to ADC 7 will be 
+     * scanned
+     * This function should be called 1 time at start up
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void ADC_Start();
+    
+    void ADC_Stop();
+
+    /** @brief update ADC value of each channel. Each packet data has channel ID and
+     * its data corresponding
+     * This function is call from ADC interrupt every time a channel is finished conversion 
+     *  @param [in]  uint8_t channelID analog channel ID, can be:
+     * - ADC_CURRENT_SENSOR_1
+     * - ADC_CURRENT_SENSOR_2
+     * - ADC_LIGHT_SENSOR
+     * - ADC_TEMPERATURE_SENSOR_1
+     * - ADC_TEMPERATURE_SENSOR_2
+     * - ADC_TEMPERATURE_SENSOR_3
+     * 
+     *                 uint16_t channelData raw data (12 bit) after ADC conversion
+     *  @param [out]  None
+     *  @return None
+     *  @retval true ADC data is posted successful to queue
+     *  @retval false ADC data is posted to queue failed
+     */
+    inline bool ADC_UpdateData(uint8_t channelID, uint16_t channelData);
+
+    /** @brief handle ADC data from ADC queue. each ADC channel value is automatically
+     * updated to ADC queue after its conversion if done.
+     * This operation get average of each ADC channel, then bypass them to a low pass
+     * filter to reduce noise. The output of the low pass filter is used to calculate/
+     * display by any tasks
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void ADC_HandleData();
+
+    /** @brief get ADC value (in count) of indicated channel
+     *  @param [in]  uint8_t channelID analog channel ID, can be:
+     * - ADC_CURRENT_SENSOR_1
+     * - ADC_CURRENT_SENSOR_2
+     * - ADC_LIGHT_SENSOR
+     * - ADC_TEMPERATURE_SENSOR_1
+     * - ADC_TEMPERATURE_SENSOR_2
+     * - ADC_TEMPERATURE_SENSOR_3
+     * 
+     *                 float* channelCount value in count of indicated channel
+     *  @param [out]  None
+     *  @return None
+     *  @retval true getting data successful
+     *  @retval false getting data failed
+     */
+    bool ADC_GetCount(uint8_t channelID, float* channelCount);
+
+    /** @brief get ADC Voltage of indicated channel. Return voltage in float, between
+     * range 0 to 3.3V
+     *  @param [in]  uint8_t channelID analog channel ID, can be:
+     * - ADC_CURRENT_SENSOR_1
+     * - ADC_CURRENT_SENSOR_2
+     * - ADC_LIGHT_SENSOR
+     * - ADC_TEMPERATURE_SENSOR_1
+     * - ADC_TEMPERATURE_SENSOR_2
+     * - ADC_TEMPERATURE_SENSOR_3
+     * 
+     *                 float* channelVoltage voltage return from channel
+     *  @param [out]  None
+     *  @return None
+     *  @retval true getting voltage successful
+     *  @retval false getting voltage failed
+     */
+    bool ADC_GetVoltage(uint8_t channelID, float* channelVoltage);
+
+
+    /* Provide C++ Compatibility */
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _ADC_H */
+
+/* *****************************************************************************
+ End of File
+ */

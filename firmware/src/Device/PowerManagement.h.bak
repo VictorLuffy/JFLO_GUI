@@ -1,0 +1,77 @@
+/* ************************************************************************** */
+/** @file [PowerManagement.h]
+ *  @brief {Power Management module manage power, supply power for the system
+ * including control the charging, consider the condition to decide the power is used is AC or
+ * cradle battery or internal battery}
+ *  @author {nguyen truong}
+ */
+/* ************************************************************************** */
+
+
+
+
+#ifndef _POWER_MANAGEMENT_H    /* Guard against multiple inclusion */
+#define _POWER_MANAGEMENT_H
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+
+
+
+/* Provide C++ Compatibility */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+    /** @brief Function to initialize I2C2, used to config main/cradle charger 
+     * as well as read data main/cradle smart battery
+     * initializing memories before operation
+     * This function should be called 1 time at start up
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void charger_Initialize();  
+    
+   
+    /** @brief Get remaining  capacity (percentage) of battery 
+    *  @param [in]  None
+    *  @param [out]  None
+    *  @return true if AC connected
+    *  @return false if AC disconnected
+    */
+   bool powerManagement_GetACConnectionState();
+   
+   /** @brief Get cradle connection current status
+    *  @param [in]  None
+    *  @param [out]  None
+    *  @return true if AC connected
+    *  @return false if AC disconnected
+    */
+   bool powerManagement_GetCradleConnectionState();
+   
+   
+   void powerManagement_PowerControl();
+   
+   
+   void powerManagement_Handle();
+
+
+
+    /* Provide C++ Compatibility */
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _POWER_MANAGEMENT_H */
+
+/* *****************************************************************************
+ End of File
+ */

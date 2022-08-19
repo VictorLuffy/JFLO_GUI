@@ -1,0 +1,180 @@
+/* ************************************************************************** */
+/** @file [AlarmTask.c]
+ *  @brief {AlarmTask module define a RTOS task for check and update alarm status}
+ *  @author {Cuong Le}
+ */
+/* ************************************************************************** */
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "AlarmTask.h"
+#include "AlarmMgr.h"
+#include "AlarmInterface.h"
+#include "GuiInterface.h"
+#include "FreeRTOS.h"
+#include "queue.h"
+#include "semphr.h"
+#include "Monitor.h"
+
+/** @brief Define Alarm task as second priority */
+#define ALARM_TASK_PRIORITY               (tskIDLE_PRIORITY + 1)
+
+/** @brief Define GUI stack size for GUI task */
+#define ALARM_TASK_STACK                  (256)        //1KB
+
+/** @brief Define alarm task delay */
+#define ALARM_TASK_DELAY                  (50 / portTICK_PERIOD_MS)
+
+/** @brief Define queue receive length */
+#define ALARM_QUEUE_RECEIVE_LENGTH        (16)
+
+/** @brief Declare queue receive */
+QueueHandle_t g_alarmQueueReceive;
+
+/** @brief external declaration */
+SemaphoreHandle_t s_alarmMonitorMutex;
+
+/** @brief external declaration */
+uint32_t g_alarmTaskTimer; //timer to counter running time
+
+TaskHandle_t gs_AlarmTaskHandle;
+
+static bool gs_IsInitAlarm = false;
+
+/** @brief Function to initialize Alarm task component
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void alarmTask_Initialize(void)
+{
+    //Create alarm queue receive
+    g_alarmQueueReceive = xQueueCreate(ALARM_QUEUE_RECEIVE_LENGTH, sizeof (ALARM_STAT_t));
+    
+    //Create alarm mutex
+    s_alarmMonitorMutex = xSemaphoreCreateMutex();
+    xSemaphoreGive(s_alarmMonitorMutex);
+    //Init all alarm
+    //alarmMgr_InitAlarm();
+
+    return;
+}
+
+/** @brief Function to create Alarm task run with FreeRTOS
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void alarmTask_Create(void)
+{
+    //Create alarm task
+    xTaskCreate((TaskFunction_t) alarmTask_Func,
+                "Alarm Task",
+                ALARM_TASK_STACK, NULL, ALARM_TASK_PRIORITY, ( TaskHandle_t * ) &gs_AlarmTaskHandle);
+
+    return;
+}
+
+/** @brief Function to initialize Alarm task component
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+#ifndef MOCK_ALARM_TASK_HANDLE_EVENT
+void alarmTask_HandleEvent(void)
+{
+    //ALARM_STAT_t alarmEvent; 
+    //alarmMgr_ClearAllAlarm();
+//    alarmMgr_UpdateAlarmMonitor();
+//    alarmMgr_CheckAllAlarm();
+//    alarmMgr_UpdateAllAlarm();
+    
+    /*
+    //wait for queue event
+    if (xQueueReceive(g_alarmQueueReceive, &alarmEvent, 0) == pdTRUE) //wait 0 tick (do not wait)
+    {
+        guiInterface_SendEventAlarm(eGuiAlarmEventId, alarmEvent.ID, alarmEvent.currentStatus);
+    }
+    return;
+    */
+
+}
+#endif
+/** @brief The function that implements the task
+ *  @param [in] void *pvParameters: parameter of alarm task
+ *  @param [out] None
+ *  @return None
+ */
+#ifndef UNIT_TEST
+static void alarmTask_Func(void *pvParameters)
+#else
+void alarmTask_Func(void *pvParameters)
+#endif
+{
+#ifndef ALARM_TASK_FUNC_CHECK
+    uint8_t count = 0;
+#endif
+    //Record execution time
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    //Loop
+    while (1)
+    {    
+        monitor_UpdateStartedTime(eAlarm);
+        //Handle event
+        alarmTask_HandleEvent();
+        
+        if(count >= 7500/50)
+        {
+            if(setting_IsInit())
+            {
+                if(gs_IsInitAlarm == false){
+                    alarmMgr_InitAlarm();
+                    gs_IsInitAlarm = true;
+                }
+
+                alarmMgr_UpdateAlarmMonitor();
+                alarmMgr_CheckAllAlarm();
+                alarmMgr_UpdateAllAlarm();
+                
+            }
+        }
+        else{
+          count++;
+        }
+        
+        //Task Delay
+        //vTaskDelay(ALARM_TASK_DELAY);
+        vTaskDelayUntil(&xLastWakeTime, ALARM_TASK_DELAY / portTICK_PERIOD_MS);
+        #ifdef UNIT_TEST
+        break;
+        #endif
+    }
+
+    return;
+}
+
+/** @brief Function to suspend Alarm task
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void alarmTask_Suspend(void) {
+    vTaskSuspend(gs_AlarmTaskHandle);
+    monitor_DisableTask(eAlarm);
+    return;
+}
+
+/** @brief Function to resume Alarm task
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void alarmTask_Resume(void) {
+    vTaskResume(gs_AlarmTaskHandle);
+    monitor_EnableTask(eAlarm);
+    return;
+}
+
+/* *****************************************************************************
+ End of File
+ */

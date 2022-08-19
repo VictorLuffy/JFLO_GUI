@@ -1,0 +1,594 @@
+/* ************************************************************************** */
+/** @file [BME280.c]
+ *  @brief {support interface to configure and obtain data from BME280 sensor. 
+ * the BME280 integrated pressure sensor, temperature sensor and humidity sensor.
+ * Communicate with BME280 via I2C3, which share resource with some other sensors}
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+
+/* This section lists the other files that are included in this file.
+ */
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <float.h>
+#include <math.h>
+
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "driver/i2c/drv_i2c.h"
+
+#include "I2C_3.h"
+#include "BME280.h"
+#include "ApplicationDefinition.h"
+#include "AlarmInterface.h"
+
+#include "HeaterTask.h"
+
+
+/** @brief BME280 product ID, define to differentiate with other sensor */
+#define BME280_SENSOR_ID       (0x60)
+
+/** @brief I2C slave address of the BME280 */
+#define BME280_BASE_ADDR       (0x76)
+
+/** @brief I2C address while writing data to BME280
+ * write address = base address << 1 + write bit (0))
+ */
+#define BME280_WRITE_ADDR      (BME280_BASE_ADDR << 1)
+
+/** @brief I2C address while reading data from BME280
+ * read address = base address << 1 + read bit(1))
+ */
+#define BME280_READ_ADDR       ((BME280_BASE_ADDR << 1) + 1)
+
+/** @brief max time wait for BME280 communication (in ms) via I2C*/
+#define BME280_MAX_WAIT_MS          (10)//(10)
+
+
+/** @brief BME280 Sensor calibration data */
+static uint16_t s_CalT1, s_CalP1, s_CalH1;
+static int16_t s_CalT2, s_CalT3;
+static int16_t s_CalP2, s_CalP3, s_CalP4, s_CalP5, s_CalP6, s_CalP7, s_CalP8, s_CalP9;
+static int16_t s_CalH2, s_CalH3, s_CalH4, s_CalH5, s_CalH6;
+
+/** @brief variable to hold latest sensor's values */
+static float s_LastTemperature, s_LastPressure, s_LastHumidity;
+
+/** @brief Flag indicate I2C3 has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_BME280Error = eDeviceNoError;
+
+/** @brief local functions */
+static bool BME280_CheckProductID();
+static bool BME280_ReadCalibrationData();
+static bool BME280_Configure();
+
+static float BME280_CalculateTemperature(int32_t raw, int32_t* t_fine);
+static float BME280_CalculateHumidity(int32_t raw, int32_t t_fine);
+static float BME280_CalculatePressure(int32_t raw, int32_t t_fine);
+
+static bool BME280_ReadMemory(uint8_t startAddr, uint8_t* buffer, uint8_t size);
+static void BME280_MakeTempCalParameters(uint8_t* ucCal);
+static void BME280_MakeHumCalParameters(uint8_t* ucCal);
+static void BME280_MakePressCalParameters(uint8_t* ucCal);
+
+static void BME280_ReportError();
+
+/** @brief Function to initialize BME280, includes checking product ID, get 
+ * Calibration parameters and configure the BME280 to work in expected mode 
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void BME280_Initialize() {
+    if (BME280_CheckProductID() == false) {
+        BME280_ReportError();
+        return;
+    }
+
+    if (BME280_ReadCalibrationData() == false) {
+        BME280_ReportError();
+        return;
+    }
+
+    //configure sensor before operation
+    if (BME280_Configure() == false) {
+        BME280_ReportError();
+        return;
+    }
+
+    //Initialize values
+    s_LastTemperature = 0;
+    s_LastPressure = 0;
+    s_LastHumidity = 0;
+    //s_BME280Error = eDeviceNoError;
+}
+
+/** @brief Read all sensor value, including temperature, humidity and pressure,
+ * from BME280 sensor via I2C, then convert them to physical data and write back
+ * to external memory
+ *  @param [in]  None   
+ *  @param [out]    float *temperature: external pointer to write temperature
+ *                  float *pressure: external pointer to write pressure
+ *                  float *humidity: external pointer to write humidity
+ *  @return None
+ *  @retval true reading values OK
+ *  @retval false can not read sensor values
+ */
+bool BME280_ReadAllValues(float *temperature, float *pressure, float *humidity) {
+    //check error
+    //if (s_BME280Error != eDeviceNoError) {
+    //    //report error
+    //    BME280_ReportError();
+    //    return false;
+    //}
+    static uint8_t s_errCounter = 0;
+    uint8_t ucTemp[16];
+    int32_t t, p, h; // raw sensor values
+    int32_t t_fine;
+
+    uint8_t readAddr = 0xf7; // start of data registers we want
+
+    if (BME280_ReadMemory(readAddr, &ucTemp[0], 8) == false) {
+        s_errCounter++;
+        if(s_errCounter >= 3)
+        {
+            //report error
+            BME280_ReportError();
+        }
+        return false;
+    }
+    else{
+        s_errCounter = 0;
+    }
+
+    p = (ucTemp[0] << 12) + (ucTemp[1] << 4) + (ucTemp[2] >> 4);
+    t = (ucTemp[3] << 12) + (ucTemp[4] << 4) + (ucTemp[5] >> 4);
+    h = (ucTemp[6] << 8) + ucTemp[7];
+
+
+    //Calculate calibrated temperature value
+    s_LastTemperature = BME280_CalculateTemperature(t, &t_fine);
+    //Calculate calibrated humidity value
+    s_LastHumidity = BME280_CalculateHumidity(h, t_fine);
+    //Calculate calibrated pressure value
+    s_LastPressure = BME280_CalculatePressure(p, t_fine);
+
+    //output value
+    if (temperature != NULL) {
+        *temperature = s_LastTemperature;
+    }
+    if (humidity != NULL) {
+        *humidity = s_LastHumidity;
+    }
+    if (pressure != NULL) {
+        *pressure = s_LastPressure;
+    }
+
+    return true;
+}
+
+/** @brief Get last temperature value obtained from BME280. This function does not
+ * execute I2C communication to update data 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return float latest temperature value
+ */
+float BME280_GetLastsTemperature() {
+    return s_LastTemperature;
+}
+
+/** @brief Get last humidity value obtained from BME280. This function does not
+ * execute I2C communication to update data 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return float latest humidity value
+ */
+float BME280_GetLastsHumidity() {
+    return s_LastHumidity;
+}
+
+/** @brief Get last pressure value obtained from BME280. This function does not
+ * execute I2C communication to update data 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return float latest pressure value
+ */
+float BME280_GetLastsPressure() {
+    return s_LastPressure;
+}
+
+/** @brief Query any error happen with BME280 
+ *  @param [in]  None   
+ *  @param [out] None
+ *  @return None
+ *  @retval true BME280 sensor has error
+ *  @retval false BME280 sensor is OK
+ */
+bool BME280_IsSensorFailed() {
+    if (s_BME280Error == eDeviceNoError) {
+        return false;       //sensor OK
+    }
+    else {
+        return true;        //sensor ERROR
+    }
+}
+
+/** @brief Read product ID from BME280 sensor via I2C, then compare with expected
+ * product ID to determine correct sensor plug in. 
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ *  @retval true reading product ID OK and the ID are correct
+ *  @retval false can not read product ID or ID is not correct
+ */
+bool BME280_CheckProductID() {
+    uint8_t readAddr = 0xD0;
+    uint8_t bme280ID = 0;
+    
+    int i;
+    bool result;
+    for (i = 0; i < 10; i++) {      //max try 10 times
+        result = BME280_ReadMemory(readAddr, &bme280ID, 1);
+        if (result == true) {
+            if (bme280ID == BME280_SENSOR_ID) {
+                break;
+            } 
+            else {
+                result = false;
+            }
+        }
+
+        //if sensor is not ready, it may be sensor need time from power supply to start
+        //should wait and try again here
+        vTaskDelay(5);
+    }
+    
+    //check result
+    if (result == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false;
+    }
+    else {
+        //clear error 
+        s_BME280Error = eDeviceNoError;
+        return true;
+    }
+}
+
+/** @brief Read calibration data from BME280 sensor via I2C. Calibration data is 
+ * used to convert raw data to actual physical. Calibration data is divided into
+ * 3 groups: Calibration for pressure, calibration for humidity and calibration 
+ * for temperature data.
+ * After I2C data is obtained, use formula supported by Bosch to make calibration
+ * parameters
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ *  @retval true reading calibration data OK
+ *  @retval false can not read calibration data
+ */
+bool BME280_ReadCalibrationData() {
+    uint8_t ucCal[36] = {0};
+    //get pressure & temperature calibration data
+    uint8_t readAddr = 0x88;
+    
+    if (BME280_ReadMemory(readAddr, &ucCal[0], 24) == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false;
+    }
+
+    //generate calibration data for Temperature and pressure
+    BME280_MakeTempCalParameters(ucCal);
+    BME280_MakePressCalParameters(ucCal);
+
+
+    //get humidity calibration data (first 1 byte)
+    readAddr = 0xa1;
+    if (BME280_ReadMemory(readAddr, &ucCal[24], 1) == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false;
+    }
+
+    //get humidity calibration data (next 7 byte)
+    readAddr = 0xe1;
+    if (BME280_ReadMemory(readAddr, &ucCal[25], 7) == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false;
+    }
+
+    //generate humidity calibration data
+    BME280_MakeHumCalParameters(ucCal);
+
+    //clear error 
+    s_BME280Error = eDeviceNoError;
+    return true;
+}
+
+/** @brief Configure BME280 to work with:
+ * - humidity over sampling rate = 1
+ * - temperature over sampling rate=1
+ * - pressure over sampling rate=1. 
+ * - standby time is 250 ms
+ * This function should be called 1 time at start up
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ *  @retval true writing data to configure sensor OK
+ *  @retval false writing data to configure sensor error
+ */
+bool BME280_Configure() {
+    int i;
+    bool result;
+    uint8_t ucTemp[2] = {0};
+
+    ucTemp[0] = 0xf2; // control humidity register
+    ucTemp[1] = 0x01; // humidity over sampling rate = 1
+    //write data and check result
+    for (i = 0; i < 3; i++) {      //max try 2 times
+        result = I2C3_Write(BME280_WRITE_ADDR, (void*) &ucTemp[0], sizeof(ucTemp), BME280_MAX_WAIT_MS);
+        if (result == true) {
+            break;
+        }
+        //delay and try again
+        vTaskDelay(10);
+    }
+    if (result == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false; //error
+    }
+
+
+    ucTemp[0] = 0xf4; // control measurement register
+    ucTemp[1] = 0x27; // normal mode, temp and pressure over sampling rate=1
+    //write data and check result
+    for (i = 0; i < 3; i++) {      //max try 2 times
+        result = I2C3_Write(BME280_WRITE_ADDR, (void*) &ucTemp[0], sizeof(ucTemp), BME280_MAX_WAIT_MS);
+        if (result == true) {
+            break;
+        }
+        //delay and try again
+        vTaskDelay(10);
+    }
+    if (result == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false; //error
+    }
+
+
+    ucTemp[0] = 0xf5; // CONFIG
+    ucTemp[1] = 0x60; // set stand by time to 250 mili-second
+    //write data and check result
+    for (i = 0; i < 3; i++) {      //max try 2 times
+        result = I2C3_Write(BME280_WRITE_ADDR, (void*) &ucTemp[0], sizeof(ucTemp), BME280_MAX_WAIT_MS);
+        if (result == true) {
+            break;
+        }
+        //delay and try again
+        vTaskDelay(10);
+    }
+    if (result == false) {
+        //set error flag
+        s_BME280Error = eDeviceErrorDetected;
+        return false; //error
+    }
+
+    //clear error 
+    s_BME280Error = eDeviceNoError;
+    return true;
+}
+
+/** @brief Calculate temperature (unit %) from raw bytes read from BME280. The 
+ * formula is supplied by Bosch
+ *  @param [in]     int32_t raw:        raw bytes read from BME280
+ *  @param [out]  int32_t* t_fine:      temperature compensation coefficients,
+ * can be used to calculate pressure and humidity if needed
+ *  @return float temperature in (C degree) after conversion
+ */
+float BME280_CalculateTemperature(int32_t raw, int32_t* t_fine) {
+    // Code based on calibration algorithm provided by Bosch.
+    int32_t var1, var2, final;
+    var1 = ((((raw >> 3) - ((int32_t) s_CalT1 << 1))) * ((int32_t) s_CalT2)) >> 11;
+    var2 = (((((raw >> 4) - ((int32_t) s_CalT1)) * ((raw >> 4) - ((int32_t) s_CalT1))) >> 12) * ((int32_t) s_CalT3)) >> 14;
+
+    int32_t tf = var1 + var2;
+    final = (tf * 5 + 128) >> 8;
+    *t_fine = tf;
+    return final / 100.0;
+}
+
+/** @brief Calculate humidity (unit %) from raw bytes read from BME280. The 
+ * formula is supplied by Bosch
+ *  @param [in]     int32_t raw:        raw bytes read from BME280
+ *                  int32_t t_fine:     temperature compensation coefficients
+ *  @param [out]  None
+ *  @return float humidity in (%) after conversion
+ */
+float BME280_CalculateHumidity(int32_t raw, int32_t t_fine) {
+    // Code based on calibration algorithm provided by Bosch.
+    int32_t var1;
+    var1 = (t_fine - ((int32_t) 76800));
+    var1 = (((((raw << 14) - (((int32_t) s_CalH4) << 20) - (((int32_t) s_CalH5) * var1)) +
+            ((int32_t) 16384)) >> 15) * (((((((var1 * ((int32_t) s_CalH6)) >> 10) * (((var1 *
+            ((int32_t) s_CalH3)) >> 11) + ((int32_t) 32768))) >> 10) + ((int32_t) 2097152)) *
+            ((int32_t) s_CalH2) + 8192) >> 14));
+    var1 = (var1 - (((((var1 >> 15) * (var1 >> 15)) >> 7) * ((int32_t) s_CalH1)) >> 4));
+    var1 = (var1 < 0 ? 0 : var1);
+    var1 = (var1 > 419430400 ? 419430400 : var1);
+    return ((uint32_t) (var1 >> 12)) / 1024.0;
+}
+
+/** @brief Calculate pressure (unit hPa) from raw bytes read from BME280. The 
+ * formula is supplied by Bosch
+ *  @param [in]     int32_t raw:        raw bytes read from BME280
+ *                  int32_t t_fine:     temperature compensation coefficients
+ *  @param [out]  None
+ *  @return float pressure in hPa after conversion
+ */
+float BME280_CalculatePressure (int32_t raw, int32_t t_fine) {
+    // Code based on calibration algorithm provided by Bosch.
+    int64_t var1, var2, pressure;
+    float final;
+
+    var1 = (int64_t) t_fine - 128000;
+    var2 = var1 * var1 * (int64_t) s_CalP6;
+    var2 = var2 + ((var1 * (int64_t) s_CalP5) << 17);
+    var2 = var2 + (((int64_t) s_CalP4) << 35);
+    var1 = ((var1 * var1 * (int64_t) s_CalP3) >> 8) + ((var1 * (int64_t) s_CalP2) << 12);
+    var1 = (((((int64_t) 1) << 47) + var1)) * ((int64_t) s_CalP1) >> 33;
+    if (var1 == 0) {
+        return -1; //NaN; // Don't divide by zero.
+    }
+    pressure = 1048576 - raw;
+    pressure = (((pressure << 31) - var2) * 3125) / var1;
+    var1 = (((int64_t) s_CalP9) * (pressure >> 13) * (pressure >> 13)) >> 25;
+    var2 = (((int64_t) s_CalP8) * pressure) >> 19;
+    pressure = ((pressure + var1 + var2) >> 8) + (((int64_t) s_CalP7) << 4);
+
+    uint32_t press = (uint32_t) pressure;
+    final = (float) press / 256.0;
+    final /= 100.0; // hPa 
+    return final;
+}
+
+/** @brief Read data of memory inside BME280 via I2C, try 2 times if error
+ *  @param [in]     uint8_t startAddr: address of memory to read
+ *                  uint8_t size:      number of byte to read
+ *  @param [out]  uint8_t* buffer:     external buffer to store data read
+ *  @return None
+ *  @retval true reading process OK
+ *  @retval false reading process error
+ */
+bool BME280_ReadMemory(uint8_t startAddr, uint8_t* buffer, uint8_t size) {
+    uint8_t cmd = startAddr;
+
+    int i;
+    bool result;
+    //write command 
+    for (i = 0; i < 3; i++) {      //max try 3 times
+        result = I2C3_Write(BME280_WRITE_ADDR, (void*) &cmd, sizeof(cmd), BME280_MAX_WAIT_MS);
+        if (result == true) {
+            break;
+        }
+        //delay and try again
+        vTaskDelay(0);
+    }
+    
+    if (result == false) {
+        s_BME280Error = eDeviceErrorDetected;
+        return false; //error
+    }
+    
+    //read data
+    for (i = 0; i < 3; i++) {      //max try 3 times
+        result = I2C3_Read(BME280_READ_ADDR, (void*) buffer, size, BME280_MAX_WAIT_MS);
+        if (result == true) {
+            break;
+        }
+        //delay and try again
+        vTaskDelay(0);
+    }
+
+    //execute I2C transfer, then check result
+    if (result == false) {
+        s_BME280Error = eDeviceErrorDetected;
+        return false;
+    }
+    else {
+        s_BME280Error = eDeviceNoError;
+        return true;
+    }
+}
+
+/** @brief Generate temperature calibration parameters, used to convert temperature bytes
+ * to actual temperature value
+ *  @param [in]     uint8_t* ucCal: array of bytes store calibration information
+ *  @param [out]  None
+ *  @return None
+ */
+void BME280_MakeTempCalParameters(uint8_t* ucCal) {
+    // Prepare temperature calibration data
+    s_CalT1 = ucCal[0] + (ucCal[1] << 8);
+    s_CalT2 = ucCal[2] + (ucCal[3] << 8);
+    s_CalT3 = ucCal[4] + (ucCal[5] << 8);
+}
+
+/** @brief Generate humidity calibration parameters, used to convert humidity bytes
+ * to actual humidity value
+ *  @param [in]     uint8_t* ucCal: array of bytes store calibration information
+ *  @param [out]  None
+ *  @return None
+ */
+void BME280_MakeHumCalParameters(uint8_t* ucCal) {
+    // Prepare humidity calibration data
+    s_CalH1 = ucCal[24];
+    s_CalH2 = ucCal[25] + (ucCal[26] << 8);
+    s_CalH3 = ucCal[27];
+    s_CalH4 = (ucCal[28] << 4) + (ucCal[29] & 0xf);
+    if (s_CalH4 > 2047) s_CalH4 -= 4096; // signed 12-bit
+    s_CalH5 = (ucCal[30] << 4) + (ucCal[29] >> 4);
+    if (s_CalH5 > 2047) s_CalH5 -= 4096;
+    s_CalH6 = ucCal[31];
+    if (s_CalH6 > 127) s_CalH6 -= 256; // signed char
+}
+
+/** @brief Generate pressure calibration parameters, used to convert pressure bytes
+ * to actual pressure value
+ *  @param [in]     uint8_t* ucCal: array of bytes store calibration information
+ *  @param [out]  None
+ *  @return None
+ */
+void BME280_MakePressCalParameters(uint8_t* ucCal) {
+    // Prepare pressure calibration data
+    s_CalP1 = ucCal[6] + (ucCal[7] << 8);
+    s_CalP2 = ucCal[8] + (ucCal[9] << 8);
+    s_CalP3 = ucCal[10] + (ucCal[11] << 8);
+    s_CalP4 = ucCal[12] + (ucCal[13] << 8);
+    s_CalP5 = ucCal[14] + (ucCal[15] << 8);
+    s_CalP6 = ucCal[16] + (ucCal[17] << 8);
+    s_CalP7 = ucCal[18] + (ucCal[19] << 8);
+    s_CalP8 = ucCal[20] + (ucCal[21] << 8);
+    s_CalP9 = ucCal[22] + (ucCal[23] << 8);
+}
+
+/** @brief Report error if occur during communicate with BME280
+ *  @param [in]   None
+ *  @param [out]  None
+ *  @return None
+ */
+void BME280_ReportError() {
+    //check whether an error is detected, then send event to ALarm task
+    if (s_BME280Error == eDeviceErrorDetected) {
+        //send event to alarm task
+        //alarmInterface_SendEvent(eBME280ErrorAlarm, eActive, 0);
+//        SYS_PRINT("\n error at: BME280_ReportError\n");
+        //change state
+        s_BME280Error = eDeviceErrorReported;
+        
+        //HEATER_CTRL_EVENT_t hEvent = {.id = eHeaterStopId};
+        //HeaterTask_SendEvent(hEvent);
+    }
+}
+
+
+/* *****************************************************************************
+ End of File
+ */

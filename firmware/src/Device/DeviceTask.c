@@ -1,0 +1,692 @@
+/** @file DeviceTask.h
+ *  @brief RTOS task for control device
+ *  @author Viet Le
+ */
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+
+#include "system_config.h"
+#include "system_definitions.h"
+
+#include "DeviceTask.h"
+#include "ADXL345.h"
+#include "ADC.h"
+#include "I2C_1.h"
+#include "I2C_2.h"
+#include "I2C_3.h"
+#include "I2C_4.h"
+#include "SmartBattery.h"
+#include "Audio.h"
+#include "Watchdog.h"
+#include "Button.h"
+
+//#include "RTC.h"
+#include "RTC_BQ32002.h"
+#include "HeaterTask.h"
+#include "BME280.h"
+#include "SDP31_O2FlowSensor.h"
+#include "SDP31_AirFlowSensor.h"
+#include "UART_4.h"
+#include "SpO2Data.h"
+#include "ChamberUnit.h"
+#include "MotorTask.h"
+#include "DRV8308.h"
+
+#include "PowerManagement.h"
+#include "AlarmEventHandler.h"
+#include "Cradle.h"
+#include "WaterSupplyCtrl.h"
+#include "DeviceInterface.h"
+#include "Monitor.h"
+#include "PWM_LCDBacklight.h"
+
+#include "Utilities/ThermalSensor.h"
+#include "Setting.h"
+#include "HumidityPower.h"
+#include "PC_Monitoring.h"
+#include "PWM_Motor.h"
+#include "FlowController.h"
+#include "GT911.h"
+
+//#define CHECK_REMAINING_STACK_SIZE
+
+/** @brief Define GUI task as second priority */
+#define		DEVICE_TASK_PRIORITY		(tskIDLE_PRIORITY + 2) 
+/** @brief Define GUI stack size for GUI task */
+#define 	DEVICE_TASK_STACK			(256) //*4byte
+/** @brief Declare GUI queue size has 16 items */
+#define 	DEVICE_QUEUE_SIZE			(16)        //16 items
+/** @brief Declare Device task periodic */
+#define         DEVICE_TASK_PERIODIC_MS                 (10)        //10 ms
+/** @brief  Device task communication Queue */
+#define 	DEVICE_QUEUE_SIZE			(16)
+/** @brief  Device task communication Queue */
+#define 	DEVICE_ALARM_EVENT_QUEUE_SIZE		(16)
+
+/** @brief  Maximum time to wait for MUTEX to get public data */
+#define 	ALARM_MONITOR_DATA_MUTEX_MAX_WAIT        (2 / portTICK_PERIOD_MS)         //2ms
+
+/** @brief  Maximum time to wait for MUTEX to get public data */
+#define 	PC_MONITOR_DATA_MUTEX_MAX_WAIT        (2 / portTICK_PERIOD_MS)         //2ms
+
+
+//FLow Control Task Queue
+QueueHandle_t s_DeviceTaskQueue = NULL;
+
+TaskHandle_t gs_DeviceTaskHandle;
+
+
+/** @brief Declare Alarm Event queue */
+QueueHandle_t g_alarmEventQueue = NULL;
+
+/** @brief MUTEX to protect Data for checking alarm sharing */
+static SemaphoreHandle_t gs_AlarmMonitorMutex = NULL;
+
+/** @brief MUTEX to protect Data for PC sharing */
+static SemaphoreHandle_t gs_PCMonitorMutex = NULL;
+
+
+static ALARM_MONITOR_t gs_stAlarmMonitor;
+
+static PC_MONITORING_t gs_stPCMonitor;
+
+//inline bool DeviceTask_SendEvent(uint8_t id, uint32_t data) {
+//    //make event to send
+//    DEVICE_TASK_EVENT_t event;
+//    event.id = id;
+//    event.data = data;
+//    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+//    //send event
+//    if (xQueueSendToBackFromISR(s_DeviceTaskQueue, &event, &xHigherPriorityTaskWoken) != pdPASS) 
+//    {
+//        xQueueReset(s_DeviceTaskQueue);
+//        return false;
+//    }
+//    return true;
+//}
+
+
+/** @brief Function to update alarm information 
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+static void DeviceTask_UpdateAlarmMonitorStruct(void);
+
+/** @brief Function to initialize Device task component
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_Initialize(void) {
+    
+    //Uart2_Initialize();
+   
+    Uart4_Initialize();
+    
+    ADC_Initialize();
+    
+    I2C1_Initialize();
+            
+    I2C2_Init();
+    
+    //initialize I2C3 for ADXL345, BME280, MCP4018, Chamber
+    I2C3_Initialize();
+    
+    _i2s_TLV320Init();
+    
+    //initialize I2C4
+    I2C4_Initialize();
+        
+    smartBattery_Initialize();
+    
+    cradle_Initialize();
+    
+    Watchdog_Init();
+    
+    rtc_Init();
+    
+    button_Init();
+    
+    SpO2Data_Inititalize();
+    
+    
+    //create FLOW CONTROL queue to communicate with other tasks
+    s_DeviceTaskQueue = xQueueCreate(DEVICE_QUEUE_SIZE, sizeof (DEVICE_EVENT_t));
+    
+    //create Alarm queue to communicate with alarm task
+    g_alarmEventQueue = xQueueCreate(DEVICE_ALARM_EVENT_QUEUE_SIZE, sizeof (DEVICE_TASK_ALARM_EVENT_t));
+    
+    //create MUTEX
+    gs_AlarmMonitorMutex = xSemaphoreCreateMutex();
+    xSemaphoreGive(gs_AlarmMonitorMutex);
+    
+    gs_PCMonitorMutex = xSemaphoreCreateMutex();
+    xSemaphoreGive(gs_PCMonitorMutex);
+    
+    return;
+}
+
+/******************************************************************************/
+
+/** @brief This operation process data of the Device task
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_ProcessData(void) {
+    DEVICE_EVENT_t event;
+    if (xQueueReceive(s_DeviceTaskQueue, &event, 0) == pdTRUE)
+    {
+        SYS_PRINT("event.id  %d\n", event.id);
+        switch (event.id)
+        {
+            case eAudioEventId:
+              Audio_HandleEvent(event.eventData.audioData.cmdId, event.eventData.audioData.data);
+              break;
+            case eAlarmEventId:
+              break;
+            default:
+              break;
+        }
+    }
+    return;
+}
+
+/** @brief The function that implements the task
+ *  @param [in] void *pvParameters: parameter of log task
+ *  @param [out] None
+ *  @return None
+ */
+
+static void DeviceTask_Func(void *pvParameters) {
+
+    vTaskDelay(50);
+
+    ADC_Start();
+    
+    Audio_Initialize();
+
+    //initialize + configure BME280
+    BME280_Initialize();
+    
+    //initialize + configure ADXL345
+    ADXL345_Initialize();
+    
+    //rtc_ConfigForTestAccuracy();
+    
+    //Forever loop
+    
+    //motor task
+    //Initialize Flow sensors
+    AirFlowSensor_Initialize();
+    O2FlowSensor_Initialize();
+    //initialize Motor Driver
+//    DRV8308_Configure();
+    //stop motor at first
+//    DRV8308_Stop();
+//    PWM_Motor_stop();
+    
+    //Record execution time
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    
+#ifdef CHECK_REMAINING_STACK_SIZE
+	UBaseType_t uxHighWaterMark;
+	uint32_t cnt = 0;
+#endif
+    
+    while (1)
+    {
+//        static uint32_t lastTick = 0;
+//        uint32_t tick = xTaskGetTickCount();
+//        SYS_PRINT("tick_ %d\n",tick - lastTick);
+//        lastTick = tick;
+
+        
+        //button_UpdateStateOfAllButton();
+        //monitor_UpdateStartedTime(eDevice);
+      
+        button_Handle();
+        
+        ADC_HandleData();
+               
+        //process data of device task
+        DeviceTask_ProcessData();
+        
+        //process alarm event
+        alarmEvenHandler_HandleEvent();
+        
+        powerManagement_UpdateACOKState();
+        
+        smartBattery_Handle();
+        
+        powerManagement_Handle();
+        
+        /*motor task*/
+        MotorTask_Run();
+        
+   
+        
+        static uint32_t s_cnt = 0;
+        if(s_cnt >= 200/DEVICE_TASK_PERIODIC_MS)
+        {
+            s_cnt = 0;
+            //control power supply
+            powerManagement_PowerControl();
+            //control water supply
+            waterSupplyCtrl_Handle();
+            
+            //if(chamber_GetChamberConnection() == eChamberConnected)
+            {
+                ADXL345_ReadAccelerometer();
+
+                float envTemp, envHum, envPress;
+                BME280_ReadAllValues(&envTemp, &envPress, &envHum);
+                //SYS_PRINT("envTemp %f, envPress %f, envHum %f\n",envTemp, envPress, envHum);
+            }
+            
+            /*heater task*/
+            HeaterTask_Run();
+            
+            //SYS_PRINT("battery voltage %d\n",cradle_GetBatteryVoltage());
+            //SYS_PRINT("battery capacity %d\n",cradle_GetBatteryRemainingCapacity()); 
+            
+            //float vIn = 0;
+            //ADC_GetVoltage(ADC_VOLT_INPUT_MONITOR, &vIn);
+            //SYS_PRINT("V input %.2f \n", vIn);
+
+               
+//            SYS_PRINT("chamber connection;  %d\n",chamber_GetChamberConnection()); 
+            
+//            SYS_PRINT("motor err:  %d\n", MotorTask_IsMotorFailed());
+            
+//            SYS_PRINT("ChamberOutTemp %.2f\n",Chamber_GetChamberOutTemp()); 
+//            SYS_PRINT("ChamberOutTemp vol %.2f\n",convertTemperatureToMillivolt(Chamber_GetChamberOutTemp(), SENSOR_TYPE_2));
+////            
+//            SYS_PRINT("BCTemperature %.2f\n",Chamber_GetBreathingCircuitTemperature()); 
+//            SYS_PRINT("BCTemperature vol %.2f\n",convertTemperatureToMillivolt(Chamber_GetBreathingCircuitTemperature(), SENSOR_TYPE_3));
+////            
+//            SYS_PRINT("EVTTemp %.2f\n",Chamber_GetEVTTemp()); 
+//            SYS_PRINT("EVTTemp vol %.2f\n",convertTemperatureToMillivolt(Chamber_GetEVTTemp(), SENSOR_TYPE_1));
+            
+                      
+//            SYS_PRINT("BreathingCircuitManufactureCode %d\n",Chamber_GetBreathingCircuitManufactureCode());
+//            SYS_PRINT("BreathingCircuitType %d\n",Chamber_GetBreathingCircuitType());
+//            SYS_PRINT("BreathingCircuitConnection %d\n",chamber_GetBreathingCircuitConnection()); 
+//            SYS_PRINT("BreathingCircuitManufactureDay %d\n",Chamber_GetBreathingCircuitManufactureDate());
+//            SYS_PRINT("BreathingCircuitFactoryCode %d\n",Chamber_GetBreathingCircuitFactoryCode());
+//            SYS_PRINT("BreathingCircuitStartUsedDay %d\n",Chamber_GetBreathingCircuitStartUsedDay());
+//            SYS_PRINT("BreathingCircuitCycleCount %d\n",Chamber_GetBreathingCircuitCycleCount());
+//            SYS_PRINT("BreathingCircuitUsedTime %d\n",Chamber_GetBreathingCircuitUsedTime());
+//            
+//            uint8_t SNO[13];
+//            Chamber_GetBreathingCircuitSerialNumber(SNO);
+//            SYS_PRINT("BreathingCircuitSerialNumber %.13s\n",SNO);
+            
+//            uint8_t CBSNO[13] = {};
+//            Chamber_GetChamberSN(CBSNO);
+//            SYS_PRINT("ChamberSN %.13s\n",CBSNO);
+            
+
+//            SYS_PRINT("ChamberUsedTime %d\n",Chamber_GetChamberUsedTime());
+            
+            
+            static bool setBCinfor = false;
+            if(setBCinfor == false)
+            {
+                setBCinfor = true;
+//                uint8_t sn[13] = "JFA220420-001";//"JFABCDEFG-HIJ";
+//                Chamber_SetBreathCircuitSerialNumber(sn);
+                
+//                 uint8_t cbsn[13] = "JFH2204000001";//"JFABCDEFG-HIJ";
+//                Chamber_SetChamberSN(cbsn);
+                
+                //Chamber_SetBreathCircuitStartUsedDay(20220506);
+                //Chamber_SetBreathCircuitFactoryCode(1);
+                //Chamber_ResetBreathingCircuitCycleCount();
+                //Chamber_ResetBreathingCircuitUsedTime();
+                
+                //Chamber_SetBreathCircuitManufactureCode(0x33);
+            }
+                    
+//            SYS_PRINT("\nsetting_Get(eSpeakerVolumeSettingId) %d \n", setting_Get(eSpeakerVolumeSettingId));
+            
+//                SYS_PRINT("Battery RemainingCapacity %d\n",smartBattery_GetRemainingCapacity()); 
+//                SYS_PRINT("Battery current %d\n",smartBattery_GetCurrent());                
+//             SYS_PRINT("Battery RunTimeToEmpty %d\n",smartBattery_GetRunTimeToEmpty());
+             
+//            SYS_PRINT("cradle_GetBatteryRemainingPercent %d\n",cradle_GetBatteryRemainingPercent());
+//            SYS_PRINT("cradle_GetBatteryRemainingCapacity %d\n",cradle_GetBatteryRemainingCapacity());
+//            SYS_PRINT("cradle_GetBatteryConnection %d\n",cradle_GetBatteryConnection());
+//            SYS_PRINT("cradle_GetBatteryVoltage %d\n",cradle_GetBatteryVoltage());
+//            SYS_PRINT("cradle_GetBatteryAverageCurrent %d\n",cradle_GetBatteryAverageCurrent());
+//            SYS_PRINT("\n\n");
+        }
+        else {
+          s_cnt++;
+          //vTaskDelay(DEVICE_TASK_PERIODIC_MS / portTICK_PERIOD_MS);
+        }
+        
+        
+        static uint32_t s_cnt2 = 0;
+        if(s_cnt2 >= 20/DEVICE_TASK_PERIODIC_MS)
+        {
+            HumidityPower_CalibrateCurrentSensorHandle();
+            Chamber_Run();
+            cradle_Run();
+            PWM_LCDBacklight_HandleBrightness();
+            
+            s_cnt2 = 0;
+            static SP02_DATA_t SpO2;
+            SpO2 = SpO2Data_ReadData();
+            
+            // update shared data
+            DeviceTask_UpdateAlarmMonitorStruct();
+                  
+        }
+        else
+        {          
+          s_cnt2++;
+        }
+
+        
+#ifdef CHECK_REMAINING_STACK_SIZE
+        uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+        //if(cnt>=1000/DEVICE_TASK_PERIODIC_MS)
+        {
+                SYS_PRINT("Device Task %d\n",uxHighWaterMark);
+                cnt = 0;
+        }
+//        else
+//        {
+//                cnt++;
+//        }
+#endif
+        vTaskDelayUntil(&xLastWakeTime, DEVICE_TASK_PERIODIC_MS / portTICK_PERIOD_MS);
+        //vTaskDelay(DEVICE_TASK_PERIODIC_MS / portTICK_PERIOD_MS);
+    }
+    return;
+}
+
+
+/** @brief Function to create Device task run with FreeRTOS
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_Create(void) {
+    xTaskCreate((TaskFunction_t) DeviceTask_Func,
+            "Device Task",
+            DEVICE_TASK_STACK, NULL, DEVICE_TASK_PRIORITY, ( TaskHandle_t * ) &gs_DeviceTaskHandle);
+    return;
+}
+
+/** @brief Function to suspend Device task
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_Suspend(void) {
+    ADC_Stop();
+    vTaskSuspend(gs_DeviceTaskHandle);
+    monitor_DisableTask(eDevice);
+    return;
+}
+
+/** @brief Function to resume Device task
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_Resume(void) {
+    ADC_Start();
+    vTaskResume(gs_DeviceTaskHandle);
+    monitor_EnableTask(eDevice);
+    return;
+}
+
+
+
+
+/** @brief Function to update alarm information 
+ *  @param [in] None
+ *  @param [out] None
+ *  @return None
+ */
+static void DeviceTask_UpdateAlarmMonitorStruct(void)
+{
+    static RTC_TIME_t time;
+    static HEATER_PUBLIC_DATA_t s_heaterData;
+    static MOTOR_PUBLIC_DATA_t s_motorData;
+    static SP02_DATA_t s_spO2Data;
+    static uint32_t s_counter = 0;
+    
+    rtc_GetTime(&time);
+    uint32_t currentDate = 20*1000000 + time.YEAR*10000 + time.MONTH*100 + time.DATE;
+    
+    //get heater data
+    HeaterTask_GetPublicData(&s_heaterData);
+    //get motor data
+    MotorTask_GetPublicData(&s_motorData);
+    //get SPO2 data
+    SpO2Data_GetData(&s_spO2Data);
+    
+    //take resource 
+    if (xSemaphoreTake(gs_AlarmMonitorMutex, ALARM_MONITOR_DATA_MUTEX_MAX_WAIT) == pdTRUE) 
+    {
+        if(s_counter >= 8000/20)
+        {
+            gs_stAlarmMonitor.self_check = false;
+        }
+        else{
+            gs_stAlarmMonitor.self_check = true;
+            s_counter++;
+        }
+//        SYS_PRINT("self_check %d\n", gs_stAlarmMonitor.self_check);
+        gs_stAlarmMonitor.BME280SensorErr = BME280_IsSensorFailed();
+        gs_stAlarmMonitor.ADXL345SensorErr = ADXL345_IsSensorFailed();
+        gs_stAlarmMonitor.AirFlowSensorErr = AirFlowSensor_IsSensorFailed(); // E101
+        gs_stAlarmMonitor.O2FlowSensorErr = O2FlowSensor_IsSensorFailed(); // E100
+        
+        
+        gs_stAlarmMonitor.BreathingCircuitType = Chamber_GetBreathingCircuitType();
+        gs_stAlarmMonitor.currentIHPower = s_heaterData.currentPower;
+        gs_stAlarmMonitor.setTargetPower = s_heaterData.targetPower;
+//        gs_stAlarmMonitor.currentBlowerRotationSpeed = DRV8308_MonitorSpeed();
+        gs_stAlarmMonitor.currentBlowerRotationSpeed = PWM_Motor_GetLatestSpeed();
+        if(MotorTask_IsOperating() == false)
+        {
+            gs_stAlarmMonitor.currentBlowerRotationSpeed = 0;
+        }
+//        SYS_PRINT("currentBlowerRotationSpeed %.0f\n", gs_stAlarmMonitor.currentBlowerRotationSpeed);
+        
+        gs_stAlarmMonitor.currentMouthTemperature = s_heaterData.breathCircuitOutTemp;
+        gs_stAlarmMonitor.setTemperature = s_heaterData.setTemp;
+        gs_stAlarmMonitor.setMouthTemperature = s_heaterData.breathCircuitOutTargetTemp;
+        gs_stAlarmMonitor.currenAmbientTemperature = s_heaterData.envTemp;
+        
+        gs_stAlarmMonitor.breathingCode = Chamber_GetBreathingCircuitManufactureCode();
+        gs_stAlarmMonitor.isBreathingCircuitConnected = chamber_GetBreathingCircuitConnection();
+        
+        gs_stAlarmMonitor.o2Info_struct.maxO2RangeSetting = 26.0;
+        gs_stAlarmMonitor.o2Info_struct.minO2RangeSetting = 19.0;
+        
+        if((s_motorData.airFlow != 0)||(s_motorData.airFlow != 0))
+        {
+            float O2 = ((0.21 * s_motorData.airFlow + s_motorData.o2Flow) / (s_motorData.airFlow + s_motorData.o2Flow)) * 100.0;
+            if(O2 >= 21.0){
+                gs_stAlarmMonitor.o2Info_struct.o2Concentration = O2;
+            }
+        }
+        else{
+            
+        }
+            
+        
+        ADXL345_GetAccelerometer(&gs_stAlarmMonitor.xAngleDirection, &gs_stAlarmMonitor.yAngleDirection);  
+//        SYS_PRINT("xAngleDirection %.2f, yAngleDirection %.2f\n", gs_stAlarmMonitor.xAngleDirection, gs_stAlarmMonitor.yAngleDirection);
+        
+        gs_stAlarmMonitor.dateManufactureBreathingCircuit = Chamber_GetBreathingCircuitManufactureDate();
+        gs_stAlarmMonitor.dateCurrentBreathingCircuit = currentDate;
+        
+        gs_stAlarmMonitor.isACConnected = powerManagement_GetACConnectionState();
+        gs_stAlarmMonitor.isChamberConnected = (bool)chamber_GetChamberConnection();
+        
+        gs_stAlarmMonitor.spo2Info_struct.spo2Connected = true;
+        gs_stAlarmMonitor.spo2Info_struct.spo2Message = (E_Spo2Signal)s_spO2Data.signal;
+        gs_stAlarmMonitor.spo2Info_struct.spo2SetLimit = 90;
+        gs_stAlarmMonitor.spo2Info_struct.spo2Value = s_spO2Data.aveValue;
+//        SYS_PRINT("s_spO2Data.signal %d\n", s_spO2Data.signal);
+//        SYS_PRINT("s_spO2Data.aveValue %d\n", s_spO2Data.aveValue);
+        
+        gs_stAlarmMonitor.failureBlower = MotorTask_IsMotorFailed();
+        gs_stAlarmMonitor.log_BreathingCircuitType = 0;
+        gs_stAlarmMonitor.curent_BreathingCircuitType = 0;
+        gs_stAlarmMonitor.isBreathingCircuitHeaterWireBroken = true;
+        
+        // Add by Thanh Duong 23/02/2022
+        gs_stAlarmMonitor.isBreathingCircuitHeaterWireBroken = false;
+        gs_stAlarmMonitor.isCradleConnected = (bool)cradle_GetCradleConnection();
+        gs_stAlarmMonitor.isFailureWaterLevelSensor = false;
+        gs_stAlarmMonitor.isFailureExternalFlashMemory = false;
+        gs_stAlarmMonitor.isFailureLightSensorAlarmId = false;
+        gs_stAlarmMonitor.isFailureMainUnitBatteryCommunication = smartBattery_IsBatteryCommunicationFailure();
+        gs_stAlarmMonitor.isFailureCradleBatteryCommunication = false;
+        gs_stAlarmMonitor.isFailureCradleCommunicationError = cradle_IsCommunicationFailure();
+        gs_stAlarmMonitor.isFailureMainRunOutofControl = false;
+        
+        gs_stAlarmMonitor.isESP32Failed = false;
+        gs_stAlarmMonitor.waterTankStatus = 0x01;
+        gs_stAlarmMonitor.setFlow = s_motorData.settingFlow;//MotorTask_GetCurrentFlowSetting();
+        gs_stAlarmMonitor.currentFlow = s_motorData.measureTotalFlow;
+        gs_stAlarmMonitor.currentO2Flow = s_motorData.o2Flow;
+        gs_stAlarmMonitor.chamberTemperatureSensorTemp = Chamber_GetChamberOutTemp();//convertTemperatureToMillivolt(Chamber_GetChamberOutTemp(), SENSOR_TYPE_1);
+        gs_stAlarmMonitor.coilTemperatureSensorTemp = Chamber_GetEVTTemp();
+        gs_stAlarmMonitor.breathingCircuitTemperatureSensorTemp = Chamber_GetBreathingCircuitTemperature();
+        gs_stAlarmMonitor.currentSensor1Volt = HumidityPower_GetVoltageCurrentSensor1();
+        gs_stAlarmMonitor.currentSensor2Volt = HumidityPower_GetVoltageCurrentSensor2();
+        
+        // Add by Thanh Duong 04/01/2022
+        gs_stAlarmMonitor.blowerControlValue = FlowController_GetControlValue();
+        if(setting_IsInit())
+        {
+            gs_stAlarmMonitor.machineMode = (E_TreatmentMode)setting_Get(eTreatmentModeSettingId);
+            gs_stAlarmMonitor.o2Info_struct.minO2RangeSetting = (float)setting_Get(eOxygenAlarmSettingLowerLimitId);
+            gs_stAlarmMonitor.o2Info_struct.maxO2RangeSetting = (float)setting_Get(eOxygenAlarmSettingUpperLimitId);
+            gs_stAlarmMonitor.spo2Info_struct.spo2SetLimit = (float)setting_Get(eSpO2AlarmSettingLowerLimitId);
+        }
+        gs_stAlarmMonitor.isIHOperating = PWM_IH_IsOperating();
+        gs_stAlarmMonitor.breathingCircuitPowerControl = 100;
+        gs_stAlarmMonitor.isMainUnitBatteryConnected = (bool)smartBattery_GetBatteryConnectionState();
+        gs_stAlarmMonitor.isCradleBatteryConnected = (bool)cradle_GetBatteryConnection();
+        gs_stAlarmMonitor.isFailureAccelerationSensor = false;
+        if (gs_stAlarmMonitor.isMainUnitBatteryConnected == true){
+            gs_stAlarmMonitor.batteryRemainingTimeInMin = smartBattery_GetRunTimeToEmpty();
+        }
+        else{
+            gs_stAlarmMonitor.batteryRemainingTimeInMin = 0;
+        }
+//        SYS_PRINT("gs_stAlarmMonitor.batteryRemainingTimeInMin %d\n", gs_stAlarmMonitor.batteryRemainingTimeInMin);
+        
+        gs_stAlarmMonitor.isCradleBattConnected = false;
+
+        gs_stAlarmMonitor.warmingUpStatus = s_heaterData.warmingUpState;
+//        SYS_PRINT("gs_stAlarmMonitor.warmingUpStatus %d\n", gs_stAlarmMonitor.warmingUpStatus);
+        
+        gs_stAlarmMonitor.isSpeakerBrokenOrDisconnected = false;
+        gs_stAlarmMonitor.isSpo2ModuleFailure = SpO2Data_IsModuleFailed();
+        gs_stAlarmMonitor.isRTCModuleFailure = rtc_IsModuleFailed();
+        gs_stAlarmMonitor.isLCDTouchModuleFailure = GT911_IsTouchFailure();
+        
+        // Test area
+
+        //static uint32_t count = 0;
+        //SYS_PRINT("\nCount: [%d]", count++);
+        //if(count >= 2*60*1000/20)
+        //{
+        //
+        //}
+        //count++;
+               
+        xSemaphoreGive(gs_AlarmMonitorMutex);          
+    }
+    
+        //take resource 
+    if (xSemaphoreTake(gs_PCMonitorMutex, PC_MONITOR_DATA_MUTEX_MAX_WAIT) == pdTRUE) 
+    {
+        // update PC monitor data
+        gs_stPCMonitor.ACState = powerManagement_GetACConnectionState();
+        gs_stPCMonitor.pulseRate = s_spO2Data.pulseRate;
+        gs_stPCMonitor.SpO2Value = s_spO2Data.aveValue;
+        gs_stPCMonitor.airFlow = s_motorData.airFlow;
+        gs_stPCMonitor.mainBatteryTemp = smartBattery_GetTemperature();
+        gs_stPCMonitor.breathingCircuitTemp = Chamber_GetBreathingCircuitTemperature();
+
+        gs_stPCMonitor.chamberOutletTemp = Chamber_GetChamberOutTemp();
+        gs_stPCMonitor.envTemp = s_heaterData.envTemp;
+        gs_stPCMonitor.inBattExt = (bool)smartBattery_GetBatteryConnectionState();
+        gs_stPCMonitor.inBattRem = smartBattery_GetRemainingPercentage();
+        
+        gs_stPCMonitor.settingTemp = s_heaterData.setTemp;
+        gs_stPCMonitor.O2Flow = s_motorData.o2Flow;
+        gs_stPCMonitor.outBattExt = (bool)cradle_GetBatteryConnection();
+        gs_stPCMonitor.outBattRem = cradle_GetBatteryRemainingPercent();
+        gs_stPCMonitor.O2Concentration = gs_stAlarmMonitor.o2Info_struct.o2Concentration;
+        gs_stPCMonitor.blowerSpeed = (uint16_t)gs_stAlarmMonitor.currentBlowerRotationSpeed;
+        gs_stPCMonitor.waterLevel = Chamber_GetTankWaterLevel();
+        gs_stPCMonitor.xAngleDirection = gs_stAlarmMonitor.xAngleDirection;
+        gs_stPCMonitor.yAngleDirection = gs_stAlarmMonitor.yAngleDirection;
+        if(setting_IsInit())
+        {
+            gs_stPCMonitor.language = (uint8_t)setting_Get(eLanguageSettingId);;
+            gs_stPCMonitor.speakerVolume = (uint8_t)setting_Get(eSpeakerVolumeSettingId);
+            gs_stPCMonitor.deviceMode = (uint8_t)setting_Get(eTreatmentModeSettingId);
+            gs_stPCMonitor.WifiState = (uint8_t)setting_Get(eWifiSettingId);
+            gs_stPCMonitor.brightnessMode = (E_BrightnessMode)setting_Get(eBrightnessModeSettingId);
+            gs_stPCMonitor.brightnessValue = 10 * setting_Get(eBrightnessLevelSettingId);
+            gs_stPCMonitor.mode = setting_Get(eTreatmentModeSettingId);
+        }
+        xSemaphoreGive(gs_PCMonitorMutex);
+    }
+
+}
+
+/** @brief Function to current Alarm monitor structure
+ *  @param [in] ALARM_MONITOR_t storagePlace
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_GetAlarmMonitorStruct(ALARM_MONITOR_t *storagePlace)
+{  
+    //take resource 
+    if (xSemaphoreTake(gs_AlarmMonitorMutex, ALARM_MONITOR_DATA_MUTEX_MAX_WAIT) == pdTRUE) {
+        //copy data
+        *storagePlace = gs_stAlarmMonitor;
+        //release semaphore
+        xSemaphoreGive(gs_AlarmMonitorMutex);
+    }
+}
+
+
+/** @brief Function to current PC monitor structure
+ *  @param [in] PC_MONITORING_t storagePlace
+ *  @param [out] None
+ *  @return None
+ */
+void DeviceTask_GetPCMonitorStruct(PC_MONITORING_t *storagePlace)
+{  
+    //take resource 
+    if (xSemaphoreTake(gs_PCMonitorMutex, PC_MONITOR_DATA_MUTEX_MAX_WAIT) == pdTRUE)
+    {
+        //copy data
+        *storagePlace = gs_stPCMonitor;
+        //release semaphore
+        xSemaphoreGive(gs_PCMonitorMutex);
+    }
+}
+
+
+
+
+/* end of file */

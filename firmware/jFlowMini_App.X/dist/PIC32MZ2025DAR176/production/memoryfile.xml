@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+<project>                                  
+  <executable name="dist/PIC32MZ2025DAR176/production/jFlowMini_App.X.production.elf">                 
+    <memory name="program">                 
+      <units>bytes</units>                 
+      <length>1019904</length>                 
+      <used>948264</used>                     
+      <free>71640</free>                     
+    </memory>                              
+    <memory name="data">              
+      <units>bytes</units>                 
+      <length>262144</length>                 
+      <used>161493</used>                     
+      <free>100651</free>                     
+    </memory>                              
+  </executable>                            
+</project>                                 

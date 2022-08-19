@@ -1,0 +1,136 @@
+/* ************************************************************************** */
+/** @file [Cradle.h]
+ *  @brief {support interface to communicate with Cradle to get 
+ * information, and control, report error if occur during communication}
+ *  @author {nguyen truong}
+ */
+/* ************************************************************************** */
+
+
+
+
+#ifndef _CRADLE_H    /* Guard against multiple inclusion */
+#define _CRADLE_H
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
+
+typedef enum
+{  
+    eDisconnect,
+    eConnect,
+}E_ConnectState;
+
+
+typedef enum
+{
+    eOff = 0x00,
+    eOn = 0x01,
+}E_OnOffState;
+
+
+/** @brief Initialize the cradle unit
+ * This function should be called before RTOS is started and call 1 time only after
+ * start up system
+ *  @param [in]  None   
+ *  @param [out]  None
+ *  @return None
+ */
+void cradle_Initialize();
+
+
+/** @brief Function to get connection status of cradle
+ *  @param [in]  None 
+ *  @param [out]  None
+ *  @retval E_ConnectState connection status of cradle
+ */
+E_ConnectState cradle_GetCradleConnection();
+
+/** @brief Function to get battery connection status
+ *  @param [in]  None 
+ *  @param [out]  None
+ *  @retval E_ConnectState connection pointer point to place where stored connection status
+ */
+E_ConnectState cradle_GetBatteryConnection();
+
+/** @brief Function to get battery remaining capacity(%)
+ *  @param [in]  None 
+ *  @param [out] None
+ *  @retval uint16_t remaining capacity of battery
+ */
+uint16_t cradle_GetBatteryRemainingCapacity();
+
+/** @brief Function to get battery status
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @retval uint16_t status of battery
+ */
+uint16_t cradle_GetBatteryStatus();
+
+/** @brief Function to get battery average current
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @retval uint16_t average current of battery
+ */
+int16_t cradle_GetBatteryAverageCurrent();
+
+/** @brief Function to get battery voltage
+ *  @param [in]  None
+ *  @param [out]  None
+ *  @retval uint16_t voltage of battery
+ */
+uint16_t cradle_GetBatteryVoltage();
+
+
+/** @brief Function to set Water Supply ON/OFF
+ *  @param [in]  E_OnOffState state: state need to set
+ *  @retval true if write data success
+ *  @retval false if write data failed  
+ */
+bool cradle_SetWaterSupplyOnOff(E_OnOffState state);
+
+/** @brief Function to set Power ON/OFF
+ *  @param [in]  E_OnOffState state: state need to set
+ *  @retval true if write data success
+ *  @retval false if write data failed  
+ */
+bool cradle_SetPowerSupplyOnOff(E_OnOffState state);
+
+/** @brief Get current status of cradle communication
+*  @param [in]  None 
+*  @param [out]  None
+*  @return bool
+*  @retval true if error, false if not error
+*/
+bool cradle_IsCommunicationFailure();
+
+void cradle_Run();
+
+bool cradleFirmwareUpdate_InitFirmware(void);
+
+bool cradleFirmwareUpdate_UpgradeFirmware(uint8_t* data, uint32_t datalen);
+
+/* Provide C++ Compatibility */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+
+
+    /* Provide C++ Compatibility */
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _CRADLE_H */
+
+/* *****************************************************************************
+ End of File
+ */

@@ -1,0 +1,293 @@
+/* ************************************************************************** */
+/** @file [HumidityPower.c]
+ *  @brief {This file contain source code necessary for Power calculation support
+ * for Humidity controller, including interface to measure the current power apply
+ * to IH coil as well as the target power (the power need to maintain both Temperature
+ * and Humidity). Some formula in this file relate tightly to information from the
+ * Requirement specification document }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+/* This section lists the other files that are included in this file.
+ */
+#include <math.h>
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+#include "system_config.h"
+#include "system_definitions.h"
+#include "ADC.h"
+#include "HumidityPower.h"
+#include <KalmanLPF.h>
+#include <RCFilter.h>
+
+/** @brief  Analog channel ID for Voltage measurement */
+#define     HUMIDITY_IH_ADC_VOLTAGE         ADC_VOLT_IH_SENSOR
+
+/** @brief  Analog channel ID for current measurement (phase 1)*/
+#define     HUMIDITY_IH_ADC_CURRENT_1       ADC_CURRENT_SENSOR_1
+
+/** @brief  Analog channel ID for current measurement (phase 2)*/
+#define     HUMIDITY_IH_ADC_CURRENT_2       ADC_CURRENT_SENSOR_2
+
+/** @brief  Offset voltage of ACS711 current sensor */
+#define ACS711_VOLTAGE_OFFSET_V      ((float)(3.3/2))       //1.65V
+
+/** @brief  Sensitive of ACS711 current sensor */
+#define ACS711_SENSITIVE_MV_PER_A     ((float)0.110)          //110 mV/A
+
+/** @brief  Formula to convert from measurement voltage (in V) to current (in A) */
+#define ACS711_MV_TO_A(v)  ((v - ACS711_VOLTAGE_OFFSET_V) / ACS711_SENSITIVE_MV_PER_A)  
+
+/** @brief  Formula to convert from voltage measured by ADC to actual Voltage supply */
+#define VOLTAGE_SUPPLY(v)  (v*(51+7.68)/7.68)
+
+#define IH_EFFICIENCY_BASE 0.8
+#define BypRatio 0.53      //????????????
+
+RCflt_t IHpower;
+
+
+static float gs_asc711VoltageOffSetSensor1 = ACS711_VOLTAGE_OFFSET_V;
+static float gs_asc711VoltageOffSetSensor2 = ACS711_VOLTAGE_OFFSET_V;
+
+static float gs_asc711SensitivitySensor1 = ACS711_SENSITIVE_MV_PER_A;
+static float gs_asc711SensitivitySensor2 = ACS711_SENSITIVE_MV_PER_A;
+
+static float ihCurrent1 = 1.65;
+static float ihCurrent2 = 1.65;
+static float s_ihVoltage = 0;
+
+/** @brief local functions  */
+double HumidityPower_EnvAbsHumidity(float envTemp, float envRH);
+
+/** @brief Convert from measurement voltage (in V) to current (in A) for sensor 1
+ *  @param [in]     Voltage(V)
+ *  @param [out]    None
+ *  @retval float   current(A)
+ */
+float HumidityPower_ConvertVoltageToCurrentSensor1(float volt)
+{
+    float current = ((volt - gs_asc711VoltageOffSetSensor1) / gs_asc711SensitivitySensor1);
+    return current;
+}
+
+/** @brief Convert from measurement voltage (in V) to current (in A) for sensor 2
+ *  @param [in]     Voltage(V)
+ *  @param [out]    None
+ *  @retval float   current(A)
+ */
+float HumidityPower_ConvertVoltageToCurrentSensor2(float volt)
+{
+    float current = ((volt - gs_asc711VoltageOffSetSensor2) / gs_asc711SensitivitySensor2);
+    return current;
+}
+
+
+/** @brief Calibrate current sensor by calculating the offset voltage and adjust sensitivity
+ *  @param [in]     None
+ *  @param [out]    None
+ *  @retval None
+ */
+void HumidityPower_CalibrateCurrentSensorHandle()
+{
+#define SAMPLE_NUM  50
+    static float s_voltageSensor1[SAMPLE_NUM] = {};
+    static float s_voltageSensor2[SAMPLE_NUM] = {};
+    static uint8_t idx = 0;
+ 
+    if(idx >= SAMPLE_NUM){
+        return;
+    }
+    
+    if ((ADC_GetVoltage(HUMIDITY_IH_ADC_CURRENT_1, &s_voltageSensor1[idx]) == true)
+        &&(ADC_GetVoltage(HUMIDITY_IH_ADC_CURRENT_2, &s_voltageSensor2[idx]) == true))
+    {
+        idx++;
+        if(idx >= SAMPLE_NUM)
+        {
+            int i;
+            gs_asc711VoltageOffSetSensor1 = 0;
+            gs_asc711VoltageOffSetSensor2 = 0;
+            for (i = 0; i < SAMPLE_NUM; i++)
+            {
+                gs_asc711VoltageOffSetSensor1 += s_voltageSensor1[i]/SAMPLE_NUM;
+                gs_asc711VoltageOffSetSensor2 += s_voltageSensor2[i]/SAMPLE_NUM;
+            }
+            
+            gs_asc711SensitivitySensor1 = ACS711_SENSITIVE_MV_PER_A * gs_asc711VoltageOffSetSensor1 * 2 / 3.3;
+            gs_asc711SensitivitySensor2 = ACS711_SENSITIVE_MV_PER_A * gs_asc711VoltageOffSetSensor2 * 2 / 3.3;
+          
+            
+            SYS_PRINT("gs_asc711VoltageOffSetSensor1 %.5f\n", gs_asc711VoltageOffSetSensor1);
+            SYS_PRINT("gs_asc711VoltageOffSetSensor2 %.5f\n", gs_asc711VoltageOffSetSensor2);
+            SYS_PRINT("gs_asc711SensitivitySensor1 %.5f\n", gs_asc711SensitivitySensor1);
+            SYS_PRINT("gs_asc711SensitivitySensor2 %.5f\n", gs_asc711SensitivitySensor2);
+        }
+    }
+}
+
+/** @brief Measure current power supply for IH coil. The power is obtained by getting
+ * the voltage supply, then multiply with total current pass though the IH. The power
+ * is used as input measured of Humidity PID controller
+ *  @param [in]     None
+ *  @param [out]    float* power        pointer to external memory to store data
+ *  @return None
+ *  @retval true    if the power is calculated OK
+ *  @retval false   if some error happen while calculating the power
+ */
+bool HumidityPower_Measure(float* power) 
+{
+    float ihVoltage;
+    if (ADC_GetVoltage(HUMIDITY_IH_ADC_VOLTAGE, &ihVoltage) == false) {
+        return false;
+    }
+    if (ADC_GetVoltage(HUMIDITY_IH_ADC_CURRENT_1, &ihCurrent1) == false) {
+        return false;
+    }
+    if (ADC_GetVoltage(HUMIDITY_IH_ADC_CURRENT_2, &ihCurrent2) == false) {
+        return false;
+    }
+
+    //ihCurrent1 = LPF(&I1, ihCurrent1);
+    //ihCurrent2 = LPF(&I2, ihCurrent2);
+  //  SYS_PRINT("ihCurrent1 %.3f, ihCurrent2 %.3f \n", ihCurrent1, ihCurrent2);
+    //SYS_PRINT("ihCurrent2 %f\n", ihCurrent2);
+
+    
+    
+    //convert measurement value to standard value
+    
+    float currentPhase1 = HumidityPower_ConvertVoltageToCurrentSensor1(ihCurrent1);
+    float currentPhase2 = - HumidityPower_ConvertVoltageToCurrentSensor2(ihCurrent2);// the change for new hardware 
+    s_ihVoltage = VOLTAGE_SUPPLY(ihVoltage);
+    
+    //SYS_PRINT("ihCurrent1 %.3f V\n", ihCurrent1);
+    //SYS_PRINT("ihCurrent2 %.3f V\n", ihCurrent2);
+    
+//    SYS_PRINT("voltage %f V\n", supplyV);
+//    SYS_PRINT("currentPhase1 %f A\n", currentPhase1);
+//    SYS_PRINT("currentPhase2 %f A\n", currentPhase2);
+    
+    //SYS_PRINT("current %f A\n", currentPhase1+currentPhase2);
+    
+    static bool init = true;
+
+    //calculate power
+    float currentPower = s_ihVoltage * (currentPhase1 + currentPhase2) / 1.0;
+    //SYS_PRINT("before filter: %.3f, ", currentPower);
+
+    if(init == true)
+    {
+      init = false;
+      Lpf_Init(&IHpower, currentPower);
+    }
+
+    // pass filter
+    currentPower = LPF(&IHpower, currentPower);
+    //SYS_PRINT("after filter: %.3f\n", currentPower);
+    
+    //output value
+    *power = 1.06*currentPower;
+//    ihCurrent1 = currentPhase1;
+//    ihCurrent2 = currentPhase2;      
+//    ihVoltage = supplyV;
+    return true;
+}
+
+/** @brief Obtain target power used for Humidity PID controller
+ *  @param [in]     float targetAbsHum  target absolute humidity
+ *                  float envTemp       environment temperature
+ *                  float envRH         environment relative humidity
+ *                  float flow          total flow pass through IH
+ *                  float outTemp       temperature measure at chamber outlet
+ *  @param [out]    None
+ *  @return double  target power
+ */
+double HumidityPower_Target(float targetAbsHum, float envTemp, float envRH, float flow, float outTemp) {
+    //calculate environment absolute humidity
+    double envAbsHumidity = HumidityPower_EnvAbsHumidity(envTemp, envRH);
+
+    /*calculate humidified power
+     * Humidified power=(target absolute humidity - environmental absolute humidity)*
+     * ((total flow)/60)*2.52*/
+    double humidifiedPower = (targetAbsHum - envAbsHumidity) * (flow / 60) * 2.52;
+
+    /* calculate heater power 
+     * Heating power=(Chamber outlet target temperature - environmental temperature)*
+     * ((total flow)/60)*1.2 */
+    double heaterPower = (outTemp - envTemp) * (flow / 60)*BypRatio * 1.2;
+
+    //calculate target power
+    double targetPower = (humidifiedPower + heaterPower) / (IH_EFFICIENCY_BASE + flow*0.0012);
+    return targetPower;
+}
+
+/** @brief Obtain environment absolute humidity from temperature and relative
+ * humidity
+ *  @param [in]     float envTemp   environment temperature
+ *                  float envRH     environment relative humidity
+ *  @param [out]    None
+ *  @return double  environment absolute humidity
+ */
+double HumidityPower_EnvAbsHumidity(float envTemp, float envRH) {
+    //?10?^((7.5*environmental temperature)/(237.3+environmental temperature))
+    double expPara1 = 7.5 * envTemp;
+    double expPara2 = 273.3 + envTemp;
+    double expPara3 = expPara1 / expPara2;
+    double expPara4 = pow(10, expPara3);
+
+    /*Environmental Absolute humidity=  
+     * (13.23*?10?^((7.5*environmental temperature)/(237.3+environmental temperature))*
+     * environmental relative humidity)/((273.15+environmental temperature))*/
+    double envHumidity = (13.23 * expPara4 * envRH) / (273.15 + envTemp);
+    return envHumidity;
+}
+
+float HumidityPower_GetVoltageCurrentSensor1()
+{
+    return ihCurrent1;
+}
+
+float HumidityPower_GetVoltageCurrentSensor2()
+{
+    return ihCurrent2;
+}
+
+float HumidityPower_GetVoltageSupply()
+{
+    return s_ihVoltage;
+}
+
+/* *****************************************************************************
+ End of File
+ */
+
+bool HumiditiPower_GetevtR(float *evtR)
+{
+    float ihVolate;
+    float ihCurrent;
+    
+    if (ADC_GetVoltage(HUMIDITY_IH_ADC_VOLTAGE, &ihVolate) == false) {
+        return false;
+    }
+    if (ADC_GetVoltage(HUMIDITY_IH_ADC_CURRENT_1, &ihCurrent1) == false) {
+        return false;
+    }
+    if (ADC_GetVoltage(HUMIDITY_IH_ADC_CURRENT_2, &ihCurrent2) == false) {
+        return false;
+    }
+
+    float currentPhase1 = HumidityPower_ConvertVoltageToCurrentSensor1(ihCurrent1);
+    float currentPhase2 = - HumidityPower_ConvertVoltageToCurrentSensor2(ihCurrent2);// the change for new hardware
+ 
+    float supplyV = VOLTAGE_SUPPLY(ihVolate);
+    ihCurrent = (currentPhase1 + currentPhase2);
+    //SYS_PRINT("ihCurrent %.2f \n", ihCurrent);
+    if(ihCurrent > 0.1)
+    {
+      *evtR = 0.25*(supplyV/ihCurrent); //25% dutys
+    }
+    return true;
+}

@@ -1,0 +1,169 @@
+/* ************************************************************************** */
+/** @file [MotorTask.h]
+ *  @brief {This file contain source code necessary for Motor Control. It implements
+ * a Motor Task, handle event come to Motor Task, initialize dependency
+ * components such as Blower, Flow sensors and control them during operation }
+ *  @author {bui phuoc}
+ */
+/* ************************************************************************** */
+
+
+
+
+#ifndef _MOTOR_TASK_H    /* Guard against multiple inclusion */
+#define _MOTOR_TASK_H
+
+#include <stdbool.h>
+#include <float.h>
+
+#ifndef UNIT_TEST
+#include "system_definitions.h"
+#include "FreeRTOS.h"
+#include "queue.h"
+#endif
+
+/* Provide C++ Compatibility */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+    /** @brief define all event ID that used to communicate with Motor Task */
+    typedef enum {
+        //IDs for Operation control
+        eMotorStartId = 0,
+        eMotorStopId,
+        eMotorPrepareStopId,
+                
+        //IDs for Settings
+        eMotorPowerId,
+        eMotorSpeedId,
+        eMotorFlowId,
+        eMotorModeId, /*operation mode*/
+
+    } E_MotorEventID;
+
+/** @brief define operation mode */
+    typedef enum {
+        /**< Power Control Mode. In this mode, Motor has been started and listen for
+         * a command to adjust power of Motor (power can be adjusted from 0% to 100%). 
+         * There are no close loop control here */
+        eMotorPowerCtrlMode,
+
+        /**< Speed Control mode. In this mode, Motor has been started. A PID controller
+         * is running to control Motor to a target of Speed setting */
+        eMotorSpeedCtrlMode,
+
+        /**< Flow Control mode. In this mode, Motor has been started. A PID controller
+         * is running to control Motor to a target of Flow setting */
+        eMotorFlowCtrlMode,
+
+    } E_MotorOperationMode;
+
+    /** @brief structure for an item in MOTOR CONTROL event Queue. Any other task
+     would like to send event to MOTOR CONTROL task should follow that structure */
+    typedef struct {
+        E_MotorEventID id;
+
+        union {
+            float fData;
+            int32_t iData;
+        };
+    } MOTOR_CTRL_EVENT_t;
+
+    /** @brief structure to store all public data to share*/
+    typedef struct {
+        float airFlow; /**< latest air flow data obtained from sensor */
+        float o2Flow; /**< latest O2 flow data obtained from sensor */
+        float speed; /**< current motor speed measurement */
+        float powerOut; /**< Power out, in percentage, currently supply for Motor */
+        float settingFlow;
+        float measureTotalFlow;
+    } MOTOR_PUBLIC_DATA_t;
+
+    /** @brief Support API to send event to MOTOR CONTROL task from other tasks
+     *  @param [in]     E_MotorEventID id    event ID   
+     *                  long data   event data
+     *  @param [out]  None
+     *  @return None
+     *  @retval true sending event to MOTOR CONTROL queue OK
+     *  @retval false sending event to MOTOR CONTROL queue ERROR
+     */
+    inline bool MotorTask_SendEvent(MOTOR_CTRL_EVENT_t event);
+
+    /** @brief Get data sharing from Motor Control such as: Air Flow, O2 Flow, 
+     * Current power supply for Motor in percent ...
+     *  @param [in]  None   
+     *  @param [out]  s_MOTOR_PUBLIC_DATA_t* data   external pointer to store data
+     *  @return None
+     *  @retval true    getting data OK
+     *  @retval false   getting data failed
+     */
+    bool MotorTask_GetPublicData(MOTOR_PUBLIC_DATA_t* data);
+
+    /** @brief Initialize MOTOR CONTROL task and all components that dependency, including
+     * I2C3 for flow sensors communication; PWM_Motor channel for Motor control; SPI3
+     * for DRV8308 Motor Driver communication
+     * This function should be called 1 times at start up
+     *  @param [in]  None   
+     *  @param [out]  None
+     *  @return None
+     */
+    void MotorTask_Inititalize(void);
+
+    /** @brief Create a Real Time task to do Flow control. 
+     *  @param [in]     None
+     *  @param [out]    None
+     *  @return None
+     */
+    void MotorTask_Create(void);
+    
+    /** @brief Function to run MOTOR CONTROL task. This function need to be call in a loop
+    *  @param [out]    None
+    *  @return None
+    */
+    void MotorTask_Run(void);
+
+    void MotorTask_HandleEvent(void);
+    void MotorTask_Maintain(void);
+    
+    /** @brief Function return current flow rate target setting
+    *  @param [in]     None
+    *  @param [out]    None
+    *  @return float
+    */
+    float MotorTask_GetCurrentFlowSetting();
+    
+    /** @brief Query any error happen with Motor 
+    *  @param [in]  None   
+    *  @param [out] None
+    *  @return None
+    *  @retval true Motor has error
+    *  @retval false Motor is OK
+    */
+   bool MotorTask_IsMotorFailed();
+
+    /** @brief Enable Motor, allow motor run 
+    *  @param [in]  None   
+    *  @param [out] None
+    *  @return None
+    */ 
+    bool MotorTask_EnableMotor();
+
+   /** @brief Disable Motor, do not allow motor run 
+    *  @param [in]  None   
+    *  @param [out] None
+    *  @return None
+    */  
+    bool MotorTask_DisableMotor();
+
+
+    /* Provide C++ Compatibility */
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _MOTOR_TASK_H */
+
+/* *****************************************************************************
+ End of File
+ */

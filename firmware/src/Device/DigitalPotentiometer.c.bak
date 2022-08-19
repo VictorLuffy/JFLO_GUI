@@ -1,0 +1,149 @@
+/* ************************************************************************** */
+/** @file [DigitalPotentiometer.c]
+ *  @brief {support interface to configure MCP4018 Digital Potentiometer. 
+ * Communicate with MCP4018 via I2C4, which share resource with some other sensors}
+ *  @author {truong nguyen}
+ */
+/* ************************************************************************** */
+
+
+
+/* This section lists the other files that are included in this file.
+ */
+
+
+#include "system_config.h"
+#include "system_definitions.h"
+#include "ApplicationDefinition.h"
+
+#include "I2C_3.h"
+#include "DigitalPotentiometer.h"
+
+/** @brief I2C slave address of the MCP4018 */
+//#define MCP4018_BASE_ADDR       (0x2F)
+#define MCP4018_BASE_ADDR       (0x2E)
+
+/** @brief I2C address while writing data to MCP4018
+ * write address = base address << 1 + write bit (0))
+ */
+#define MCP4018_WRITE_ADDR      (MCP4018_BASE_ADDR << 1)
+
+/** @brief I2C address while reading data from MCP4018
+ * read address = base address << 1 + read bit(1))
+ */
+#define MCP4018_READ_ADDR       ((MCP4018_BASE_ADDR << 1) + 1)
+
+/** @brief max time wait for MCP4018 communication (in ms) via I2C*/
+#define MCP4018_MAX_WAIT_MS     (10)
+
+
+
+
+/** @brief Flag indicate I2C4 has error
+ * true mean error happened
+ * false mean no error */
+static E_DeviceErrorState s_MCP4018Error = eDeviceNoError;
+
+/** @brief local functions */
+
+
+/** @brief Report error if occur during communicate with MCP4018
+ *  @param [in]   None
+ *  @param [out]  None
+ *  @return None
+ */
+static void DigitalPotentiometer_ReportError() {
+    //check whether an error is detected, then send event to ALarm task
+    if (s_MCP4018Error == eDeviceErrorDetected) {
+        //send event to alarm task
+        //alarmInterface_SendEvent(eMCP4018ErrorAlarm, eActive, 0);
+        SYS_PRINT("error at: MCP4018_ReportError \n");
+//        //change state
+//        s_MCP4018Error = eDeviceErrorReported;
+//        
+//        HEATER_CTRL_EVENT_t hEvent = {.id = eHeaterStopId};
+//        HeaterTask_SendEvent(hEvent);
+    }
+}
+
+
+/** @brief Potentiometer 7-bit Resistor Network Resolution - 127 Resistors (128 Steps)
+ *  @param [in]   uint8_t level ranges from 0 to 127 
+ *  @param [out]  None
+ *  @return None
+ *  @retval None
+ */
+void DigitalPotentiometer_SetLevel(uint8_t level) 
+{
+    uint8_t RegValue = level;
+    uint8_t buffWrite[2] = {};
+    //command code
+    buffWrite[0] = 0x00;
+    //data
+    buffWrite[1] = level;
+    
+    int i;
+    bool result;
+    //write command 
+    for (i = 0; i < 2; i++) {      //max try 3 times
+        result = I2C3_Write(MCP4018_WRITE_ADDR, (void*) buffWrite, sizeof(buffWrite), MCP4018_MAX_WAIT_MS);
+        if (result == true) {
+            //SYS_PRINT("I2C_3 write to MCP4018 OK\n");
+            break;
+        }
+        else{
+            SYS_PRINT("I2C_3 write to MCP4018 fail\n");
+        }
+        //delay and try again
+        vTaskDelay(0);
+    }
+    
+    if (result == false) {
+        s_MCP4018Error = eDeviceErrorDetected;
+        DigitalPotentiometer_ReportError();
+
+    }
+      
+}
+
+void DigitalPotentiometer_Test()
+{
+    
+    
+    uint8_t read = 0;
+    uint8_t command = 0x00;
+    if(I2C3_Write(MCP4018_WRITE_ADDR, (void*) &command, sizeof(command), MCP4018_MAX_WAIT_MS) == true)
+    {
+        if(I2C3_Read(MCP4018_READ_ADDR, 
+                    (void*)&read, 1, MCP4018_MAX_WAIT_MS) == false)
+        {            
+            SYS_PRINT("MCP4018 I2C_3 Read Fail\n");
+        }
+        else
+        {
+            SYS_PRINT("MCP4018 I2C_3 Read OK, data = %d\n", read);
+        }
+    }
+}
+
+//void DigitalPotentiometer_Test()
+//{
+//      uint8_t read = 0;
+//    if(I2C3_Read(MCP4018_READ_ADDR, 
+//                (void*)&read, 1, MCP4018_MAX_WAIT_MS) == false)
+//        {            
+//            SYS_PRINT("MCP4018 I2C_3 Read Fail\n");
+//            return false;
+//        }
+//        else
+//        {
+//            SYS_PRINT("MCP4018 I2C_3 Read OK, data = %d\n", read);
+//        }
+//}
+
+
+
+
+/* *****************************************************************************
+ End of File
+ */
